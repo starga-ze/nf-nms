@@ -1,0 +1,25 @@
+[Unit]
+Description=NF Engine Daemon
+
+After=nf-ipcd.service
+Requires=nf-ipcd.service
+PartOf=nf-nms.target
+
+[Service]
+Type=simple
+ExecStart=/opt/nf-nms/bin/nf-engined
+
+Restart=always
+RestartSec=3
+
+LimitNOFILE=1048576
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=nf-engined
+
+KillSignal=SIGTERM
+TimeoutStopSec=10
+
+[Install]
+WantedBy=nf-nms.target

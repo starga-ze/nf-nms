@@ -1,0 +1,22 @@
+[Unit]
+Description=NF ICMP Daemon
+
+After=nf-ipcd.service
+Requires=nf-ipcd.service
+PartOf=nf-nms.target
+
+[Service]
+Type=simple
+ExecStart=/opt/nf-nms/bin/nf-icmpd
+
+Restart=always
+RestartSec=3
+
+LimitNOFILE=65536
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=nf-icmpd
+
+[Install]
+WantedBy=nf-nms.target

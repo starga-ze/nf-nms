@@ -1,0 +1,23 @@
+[Unit]
+Description=NF IPC Daemon
+After=network.target
+PartOf=nf-nms.target
+
+[Service]
+Type=simple
+ExecStart=/opt/nf-nms/bin/nf-ipcd
+
+Restart=always
+RestartSec=2
+
+LimitNOFILE=1048576
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=nf-ipcd
+
+KillSignal=SIGTERM
+TimeoutStopSec=10
+
+[Install]
+WantedBy=nf-nms.target

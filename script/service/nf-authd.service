@@ -1,0 +1,22 @@
+[Unit]
+Description=NF Auth Daemon
+
+After=nf-ipcd.service
+Requires=nf-ipcd.service
+PartOf=nf-nms.target
+
+[Service]
+Type=simple
+ExecStart=/opt/nf-nms/bin/nf-authd
+
+Restart=always
+RestartSec=3
+
+LimitNOFILE=65536
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=nf-authd
+
+[Install]
+WantedBy=nf-nms.target

@@ -1,0 +1,10 @@
+{
+  "daemon_name": "nf-engined",
+
+  "logger": {
+    "name": "nf-engined",
+    "file": "/var/log/nf-nms/engined.log",
+    "max_file_size": 5242880,
+    "max_files": 100
+  }
+}

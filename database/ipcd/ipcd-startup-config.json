@@ -1,0 +1,32 @@
+{
+  "daemon_name": "nf-ipcd",
+
+  "logger": {
+    "name": "nf-ipcd",
+    "file": "/var/log/nf-nms/ipcd.log",
+    "max_file_size": 5242880,
+    "max_files": 100
+  },
+
+  "ipc": {
+    "socket_path": "/run/nf-nms/ipcd.sock",
+    "max_connections": 128,
+    "max_frame_size": 65536,
+    "rx_buffer_size": 65536,
+    "tx_buffer_size": 65536
+  },
+
+  "router": {
+    "allow_unknown_dst": false
+  },
+
+  "daemon_map": {
+    "ipcd": 1,
+    "engined": 2,
+    "mgmtd": 3,
+    "authd": 4,
+    "snmpd": 5,
+    "icmpd": 6,
+    "topologyd": 7
+  }
+}
