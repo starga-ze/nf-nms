@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/Core.h"
+#include "util/ThreadManager.h"
 
 namespace nf::engined
 {

@@ -19,5 +19,8 @@ SyslogIdentifier=nf-ipcd
 KillSignal=SIGTERM
 TimeoutStopSec=10
 
+RuntimeDirectory=nf-nms
+RuntimeDirectoryMode=0755
+
 [Install]
 WantedBy=nf-nms.target
