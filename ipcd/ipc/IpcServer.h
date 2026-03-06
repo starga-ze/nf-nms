@@ -3,34 +3,34 @@
 #include "config/ConfigTypes.h"
 #include "io/Epoll.h"
 
-#include <unordered_map>
+#include <atomic>
 #include <memory>
+#include <unordered_map>
 #include <vector>
-#include <functional>
-#include <string>
+
+#include <sys/epoll.h>
+
+namespace nf::ipc
+{
+class IpcConnection;
+class IpcFraming;
+}
 
 namespace nf::ipcd
 {
-    
-using IpcConfig = nf::config::IpcConfig;
-using Epoll = nf::io::Epoll;
-
-class IpcConnection;
 class IpcRouter;
-    
 class IpcServer
 {
 public:
-    explicit IpcServer(const IpcConfig& cfg);
+    explicit IpcServer(const nf::config::IpcConfig& cfg);
     ~IpcServer();
 
     bool init();
-
     void start();
     void stop();
 
-    void broadcastFrame(int srcFd, const std::vector<uint8_t>& frame);
     bool sendFrameTo(int dstFd, const std::vector<uint8_t>& frame);
+    void broadcastFrame(int srcFd, const std::vector<uint8_t>& frame);
 
 private:
     bool createListenSocket();
@@ -45,17 +45,19 @@ private:
 
     bool enqueueTx(int fd, const uint8_t* data, size_t len);
 
-    const IpcConfig& m_cfg;
+private:
+    const nf::config::IpcConfig& m_cfg;
 
-    Epoll m_epoll;
-
+    nf::io::Epoll m_epoll;
     int m_listenFd{-1};
-    bool m_running{false};
 
-    std::unordered_map<int, std::unique_ptr<IpcConnection>> m_conns;
-    std::unique_ptr<IpcRouter> m_router;
+    std::atomic<bool> m_running{false};
 
     std::vector<epoll_event> m_events;
+
+    std::unordered_map<int, std::unique_ptr<nf::ipc::IpcConnection>> m_conns;
+
+    std::unique_ptr<IpcRouter> m_router;
 };
 
 } // namespace nf::ipcd

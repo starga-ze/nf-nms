@@ -1,11 +1,12 @@
+#include "ipc/IpcRouter.h"
 #include "ipc/IpcServer.h"
 
 #include "ipc/IpcConnection.h"
-#include "ipc/IpcRouter.h"
-
 #include "ipc/IpcFraming.h"
+
 #include "util/Logger.h"
 
+#include <cstring>
 #include <errno.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -13,7 +14,7 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 
-#include <cstring>
+using namespace nf::ipc;
 
 namespace nf::ipcd
 {
@@ -21,9 +22,7 @@ namespace nf::ipcd
 static constexpr int MAX_EVENTS = 64;
 static constexpr int LISTEN_BACKLOG = 64;
 
-IpcServer::IpcServer(const nf::config::IpcConfig& cfg) : 
-    m_cfg(cfg), 
-    m_events(MAX_EVENTS)
+IpcServer::IpcServer(const nf::config::IpcConfig& cfg) : m_cfg(cfg), m_events(MAX_EVENTS)
 {
     m_router = std::make_unique<IpcRouter>(*this);
 }
@@ -67,7 +66,8 @@ bool IpcServer::init()
 
 void IpcServer::start()
 {
-    init();
+    if (!init())
+        return;
 
     m_running = true;
 
@@ -113,6 +113,7 @@ void IpcServer::start()
         m_epoll.del(fd);
         ::close(fd);
     }
+
     m_conns.clear();
 
     m_epoll.del(m_listenFd);
@@ -197,7 +198,8 @@ void IpcServer::acceptLoop()
 
         setNonBlocking(fd);
 
-        m_conns.emplace(fd, std::make_unique<IpcConnection>(fd, m_cfg.rxBufferSize, m_cfg.txBufferSize));
+        m_conns.emplace(fd, 
+                std::make_unique<IpcConnection>(fd, m_cfg.rxBufferSize,m_cfg.txBufferSize));
 
         m_epoll.add(fd, EPOLLIN | EPOLLRDHUP);
 
@@ -209,6 +211,7 @@ void IpcServer::closeConn(int fd)
 {
     m_epoll.del(fd);
     ::close(fd);
+
     m_conns.erase(fd);
 
     LOG_INFO("IpcServer: client disconnected fd={}", fd);
@@ -244,12 +247,13 @@ void IpcServer::handleReadable(int fd)
             while (true)
             {
                 size_t frameLen = 0;
-                auto fr = nf::ipc::IpcFraming::tryExtractFrame(rxRing, frameLen);
 
-                if (fr == nf::ipc::IpcFramingResult::NeedMoreData)
+                auto fr = IpcFraming::tryExtractFrame(rxRing, frameLen);
+
+                if (fr == IpcFramingResult::NeedMoreData)
                     break;
 
-                if (fr != nf::ipc::IpcFramingResult::Ok)
+                if (fr != IpcFramingResult::Ok)
                 {
                     LOG_WARN("IpcServer: framing error, closing fd={}", fd);
                     closeConn(fd);
@@ -257,6 +261,7 @@ void IpcServer::handleReadable(int fd)
                 }
 
                 std::vector<uint8_t> frame(frameLen);
+
                 size_t got = rxRing.read(frame.data(), frameLen);
                 if (got != frameLen)
                 {
@@ -265,7 +270,7 @@ void IpcServer::handleReadable(int fd)
                     return;
                 }
 
-                m_router->routeBroadcast(fd, frame);
+                m_router->onFrame(fd, frame);
             }
 
             continue;
@@ -340,6 +345,7 @@ bool IpcServer::enqueueTx(int fd, const uint8_t* data, size_t len)
         return false;
 
     auto& txRing = it->second->tx();
+
     if (txRing.writable() < len)
         return false;
 

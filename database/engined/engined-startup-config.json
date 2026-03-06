@@ -6,5 +6,13 @@
     "file": "/var/log/nf-nms/engined.log",
     "max_file_size": 5242880,
     "max_files": 100
+  },
+
+  "ipc": {
+    "socket_path": "/run/nf-nms/ipcd.sock",
+    "max_connections": 128,
+    "max_frame_size": 65536,
+    "rx_buffer_size": 65536,
+    "tx_buffer_size": 65536
   }
 }

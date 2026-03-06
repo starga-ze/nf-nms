@@ -1,6 +1,9 @@
 #pragma once
 
-#include <string>
+#include "config/ConfigTypes.h"
+#include "algorithm/ByteRingBuffer.h"
+
+#include <atomic>
 #include <vector>
 
 namespace nf::ipc
@@ -9,15 +12,28 @@ namespace nf::ipc
 class IpcClient
 {
 public:
-    IpcClient(const std::string& path);
+    explicit IpcClient(const nf::config::IpcConfig& cfg);
     ~IpcClient();
 
-    bool connect();
-    bool send(const void* data, size_t len);
+    void start();
+    void stop();
 
 private:
-    std::string m_path;
+    bool connectServer();
+    void closeSocket();
+
+    void recvLoop();
+    void sendHeartbeat();
+
+    bool setNonBlocking(int fd);
+
+private:
+    const nf::config::IpcConfig& m_cfg;
+
     int m_fd{-1};
+    std::atomic<bool> m_running{false};
+
+    nf::algorithm::ByteRingBuffer m_rxRing;
 };
 
 }

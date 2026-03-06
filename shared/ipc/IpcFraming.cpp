@@ -1,73 +1,45 @@
-#include "algorithm/ByteRingBuffer.h"
 #include "ipc/IpcFraming.h"
+#include "algorithm/ByteRingBuffer.h"
 
+#include <cstdint>
 #include <cstring>
+#include <arpa/inet.h>
+
+static constexpr size_t IPC_LEN_FIELD_SIZE = 2;
+static constexpr size_t IPC_MAX_BODY_LEN   = 64 * 1024; // adjust if needed
 
 namespace nf::ipc
 {
 
-static constexpr size_t IPC_HEADER_SIZE = 2;
-static constexpr size_t IPC_MAX_BODY_LEN = 64 * 1024;
-
-uint16_t IpcFraming::readBodyLen(const uint8_t hdr[2])
+IpcFramingResult IpcFraming::tryExtractFrame(const nf::algorithm::ByteRingBuffer& rxRing,
+                                            size_t& outFrameLen)
 {
-    return (static_cast<uint16_t>(hdr[0]) << 8) | static_cast<uint16_t>(hdr[1]);
-}
+    outFrameLen = 0;
 
-IpcFramingResult IpcFraming::tryExtractFrame(const ByteRingBuffer& rxRing, size_t& outFrameLen)
-{
-    if (rxRing.readable() < IPC_HEADER_SIZE)
-    {
+    if (rxRing.readable() < IPC_LEN_FIELD_SIZE)
         return IpcFramingResult::NeedMoreData;
-    }
 
-    uint8_t hdr[IPC_HEADER_SIZE];
+    uint16_t bodyLenNet = 0;
 
-    rxRing.peek(hdr, IPC_HEADER_SIZE);
+    // IMPORTANT: requires ByteRingBuffer::peek(void*, size_t) (non-consuming)
+    if (!rxRing.peek(reinterpret_cast<uint8_t*>(&bodyLenNet), IPC_LEN_FIELD_SIZE))
+        return IpcFramingResult::NeedMoreData;
 
-    uint16_t bodyLen = readBodyLen(hdr);
+    const uint16_t bodyLen = ntohs(bodyLenNet);
+
+    if (bodyLen == 0)
+        return IpcFramingResult::Invalid;
 
     if (bodyLen > IPC_MAX_BODY_LEN)
-    {
-        return IpcFramingResult::InvalidBodyLen;
-    }
+        return IpcFramingResult::TooLarge;
 
-    size_t frameLen = bodyLen + IPC_HEADER_SIZE;
+    const size_t frameLen = IPC_LEN_FIELD_SIZE + bodyLen;
 
     if (rxRing.readable() < frameLen)
-    {
         return IpcFramingResult::NeedMoreData;
-    }
 
     outFrameLen = frameLen;
-
     return IpcFramingResult::Ok;
-}
-
-void IpcFraming::buildFrame(const uint8_t* body, size_t bodyLen, std::vector<uint8_t>& outFrame)
-{
-    if (bodyLen > IPC_MAX_BODY_LEN)
-    {
-        outFrame.clear();
-        return;
-    }
-
-    outFrame.resize(bodyLen + IPC_HEADER_SIZE);
-
-    uint8_t* ptr = outFrame.data();
-
-    ptr[0] = static_cast<uint8_t>((bodyLen >> 8) & 0xff);
-    ptr[1] = static_cast<uint8_t>(bodyLen & 0xff);
-
-    if (bodyLen > 0)
-    {
-        std::memcpy(ptr + IPC_HEADER_SIZE, body, bodyLen);
-    }
-}
-
-void IpcFraming::buildFrame(const std::vector<uint8_t>& body, std::vector<uint8_t>& outFrame)
-{
-    buildFrame(body.data(), body.size(), outFrame);
 }
 
 } // namespace nf::ipc
