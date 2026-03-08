@@ -21,7 +21,6 @@ IpcFramingResult IpcFraming::tryExtractFrame(const nf::algorithm::ByteRingBuffer
 
     uint16_t bodyLenNet = 0;
 
-    // IMPORTANT: requires ByteRingBuffer::peek(void*, size_t) (non-consuming)
     if (!rxRing.peek(reinterpret_cast<uint8_t*>(&bodyLenNet), IPC_LEN_FIELD_SIZE))
         return IpcFramingResult::NeedMoreData;
 

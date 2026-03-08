@@ -34,6 +34,8 @@ private:
 
     void startThreads();
 
+    void sendHello();
+
     LoggerConfig m_loggerConfig;
     IpcConfig m_ipcConfig;
     

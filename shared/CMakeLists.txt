@@ -13,4 +13,5 @@ target_include_directories(nf-shared PUBLIC
 
 target_link_libraries(nf-shared PUBLIC
     spdlog::spdlog
+    nlohmann_json::nlohmann_json
 )

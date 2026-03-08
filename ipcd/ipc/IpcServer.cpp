@@ -209,10 +209,19 @@ void IpcServer::acceptLoop()
 
 void IpcServer::closeConn(int fd)
 {
+    auto it = m_conns.find(fd);
+    if (it == m_conns.end())
+    {
+        LOG_WARN("fd={} not exist on connection map", fd);
+        return;
+    }
+
     m_epoll.del(fd);
     ::close(fd);
 
     m_conns.erase(fd);
+    
+    m_router->onDisconnect(fd);
 
     LOG_INFO("IpcServer: client disconnected fd={}", fd);
 }

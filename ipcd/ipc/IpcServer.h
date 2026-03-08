@@ -32,13 +32,14 @@ public:
     bool sendFrameTo(int dstFd, const std::vector<uint8_t>& frame);
     void broadcastFrame(int srcFd, const std::vector<uint8_t>& frame);
 
+    void closeConn(int fd);
+
 private:
     bool createListenSocket();
     bool bindAndListen();
     bool setNonBlocking(int fd);
 
     void acceptLoop();
-    void closeConn(int fd);
 
     void handleReadable(int fd);
     void handleWritable(int fd);

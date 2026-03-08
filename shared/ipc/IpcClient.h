@@ -1,9 +1,12 @@
 #pragma once
 
+#include "ipc/IpcConnection.h"
+#include "ipc/IpcFraming.h"
 #include "config/ConfigTypes.h"
-#include "algorithm/ByteRingBuffer.h"
+#include "io/Epoll.h"
 
 #include <atomic>
+#include <memory>
 #include <vector>
 
 namespace nf::ipc
@@ -18,22 +21,24 @@ public:
     void start();
     void stop();
 
+    bool sendFrame(const std::vector<uint8_t>& frame);
+
 private:
     bool connectServer();
-    void closeSocket();
-
-    void recvLoop();
-    void sendHeartbeat();
-
     bool setNonBlocking(int fd);
+
+    void handleReadable();
+    void handleWritable();
 
 private:
     const nf::config::IpcConfig& m_cfg;
 
-    int m_fd{-1};
-    std::atomic<bool> m_running{false};
+    nf::io::Epoll m_epoll;
+    std::vector<epoll_event> m_events;
 
-    nf::algorithm::ByteRingBuffer m_rxRing;
+    std::unique_ptr<IpcConnection> m_conn;
+
+    std::atomic<bool> m_running{false};
 };
 
 }

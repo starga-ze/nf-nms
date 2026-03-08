@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ipc/IpcMessage.h"
+#include "ipc/IpcProtocol.h"
 
 #include <cstdint>
 #include <unordered_map>
@@ -30,8 +30,8 @@ private:
     IpcServer& m_server;
 
     // daemonId <-> fd mapping
-    std::unordered_map<uint16_t, int> m_daemonToFd;
-    std::unordered_map<int, uint16_t> m_fdToDaemon;
+    std::unordered_map<nf::ipc::IpcDaemon, int> m_daemonToFd;
+    std::unordered_map<int, nf::ipc::IpcDaemon> m_fdToDaemon;
 };
 
 } // namespace nf::ipcd

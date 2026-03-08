@@ -1,6 +1,10 @@
 #include "ipc/IpcRouter.h"
 #include "ipc/IpcServer.h"
+
 #include "util/Logger.h"
+
+#include <cstdint>
+#include <vector>
 
 using namespace nf::ipc;
 
@@ -18,18 +22,23 @@ void IpcRouter::onDisconnect(int fd)
     if (it == m_fdToDaemon.end())
         return;
 
-    uint16_t daemonId = it->second;
+    IpcDaemon daemonId = it->second;
     m_fdToDaemon.erase(it);
 
     auto it2 = m_daemonToFd.find(daemonId);
     if (it2 != m_daemonToFd.end() && it2->second == fd)
         m_daemonToFd.erase(it2);
 
-    LOG_INFO("IpcRouter: unregistered fd={} daemonId={}", fd, daemonId);
+    LOG_INFO("IpcRouter: unregistered fd={} daemonId={}",
+             fd,
+             static_cast<int>(daemonId));
 }
+
 
 void IpcRouter::onFrame(int srcFd, const std::vector<uint8_t>& frame)
 {
+    LOG_DEBUG("IPC Server Rx Dump\n{}", dumpFrame(frame));
+
     IpcHeader h{};
     const uint8_t* payload = nullptr;
     size_t payloadLen = 0;
@@ -42,7 +51,7 @@ void IpcRouter::onFrame(int srcFd, const std::vector<uint8_t>& frame)
 
     const auto cmd = static_cast<IpcCmd>(h.cmd);
 
-    if (cmd == IpcCmd::Hello)
+    if (cmd == IpcCmd::ClientHello)
     {
         handleHello(srcFd, h, payload, payloadLen);
         return;
@@ -51,49 +60,81 @@ void IpcRouter::onFrame(int srcFd, const std::vector<uint8_t>& frame)
     route(srcFd, h, frame);
 }
 
-void IpcRouter::handleHello(int fd, const IpcHeader& h, const uint8_t* payload, size_t payloadLen)
+
+void IpcRouter::handleHello(int fd,
+                            const IpcHeader& h,
+                            const uint8_t* payload,
+                            size_t payloadLen)
 {
-    // Minimal HELLO payload: u16 daemonId (network order)
-    if (payloadLen < sizeof(uint16_t))
+    (void)payload;
+    (void)payloadLen;
+
+    IpcDaemon daemonId = static_cast<IpcDaemon>(h.src);
+
+    /* reconnect handling */
+    auto it = m_daemonToFd.find(daemonId);
+    if (it != m_daemonToFd.end())
     {
-        LOG_WARN("IpcRouter: HELLO too short fd={}", fd);
-        return;
+        int oldFd = it->second;
+
+        if (oldFd != fd)
+        {
+            LOG_WARN("IpcRouter: daemon {} reconnect, oldFd={} newFd={}",
+                     static_cast<int>(daemonId),
+                     oldFd,
+                     fd);
+
+            m_server.closeConn(oldFd);
+        }
+        else
+        {
+            LOG_WARN("daemon {} already exist on map", static_cast<int>(daemonId));
+        }
     }
-
-    uint16_t daemonIdNet = 0;
-    std::memcpy(&daemonIdNet, payload, sizeof(uint16_t));
-    uint16_t daemonId = ntohs(daemonIdNet);
-
     m_daemonToFd[daemonId] = fd;
     m_fdToDaemon[fd] = daemonId;
 
-    LOG_INFO("IpcRouter: registered fd={} daemonId={}", fd, daemonId);
+    LOG_INFO("IpcRouter: registered fd={} daemonId={}", fd, static_cast<int>(daemonId));
+    
+    /* ACK back */
+    auto frame = buildFrame(
+            IpcDaemon::Ipcd,
+            daemonId,
+            IpcCmd::Heartbeat,
+            reinterpret_cast<const uint8_t*>("hello-ack"),
+            sizeof("hello-ack") - 1);
 
-    // optional: ACK back (Heartbeat cmd used as quick ACK here, change later)
-    auto ack = buildFrame(/*src*/0, /*dst*/daemonId, IpcCmd::Heartbeat,
-                          reinterpret_cast<const uint8_t*>("hello-ack"),
-                          sizeof("hello-ack") - 1);
+    LOG_DEBUG("IPC Server Tx Dump\n{}", dumpFrame(frame));
 
-    m_server.sendFrameTo(fd, ack);
+    m_server.sendFrameTo(fd, frame);
 }
 
-void IpcRouter::route(int srcFd, const IpcHeader& h, const std::vector<uint8_t>& frame)
+
+void IpcRouter::route(int srcFd,
+                      const IpcHeader& h,
+                      const std::vector<uint8_t>& frame)
 {
-    if (h.dst == IPC_DST_BROADCAST)
+    if (static_cast<IpcDaemon>(h.dst) == IpcDaemon::Broadcast)
     {
         m_server.broadcastFrame(srcFd, frame);
         return;
     }
 
-    // dst is daemonId
-    auto it = m_daemonToFd.find(h.dst);
+    IpcDaemon dstDaemon = static_cast<IpcDaemon>(h.dst);
+
+    auto it = m_daemonToFd.find(dstDaemon);
     if (it == m_daemonToFd.end())
     {
-        LOG_WARN("IpcRouter: unknown dst daemonId={} from fd={}", h.dst, srcFd);
+        LOG_WARN("IpcRouter: unknown dst daemonId={} from fd={}",
+                 static_cast<int>(dstDaemon),
+                 srcFd);
         return;
     }
 
-    const int dstFd = it->second;
+    int dstFd = it->second;
+
+    LOG_DEBUG("IPC Server Tx Dump\n{}", dumpFrame(frame));
+
     m_server.sendFrameTo(dstFd, frame);
 }
 
