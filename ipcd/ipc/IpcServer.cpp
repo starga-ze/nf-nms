@@ -82,7 +82,7 @@ void IpcServer::start()
             int fd = m_events[i].data.fd;
             uint32_t ev = m_events[i].events;
 
-            if (fd == m_epoll.getWakeupFd())
+            if (fd == m_epoll.getEventFd())
             {
                 m_epoll.drainWakeup();
                 continue;
@@ -374,8 +374,6 @@ bool IpcServer::sendFrameTo(int dstFd, const std::vector<uint8_t>& frame)
         LOG_WARN("IpcServer: tx ring full, drop frame dstFd={}", dstFd);
         return false;
     }
-
-    handleWritable(dstFd);
     return true;
 }
 

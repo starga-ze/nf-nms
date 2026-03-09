@@ -22,10 +22,7 @@ public:
 
     int wait(std::vector<epoll_event>& events, int timeoutMs);
 
-    int getWakeupFd() const
-    {
-        return m_eventFd;
-    }
+    int getEventFd() const;
     void wakeup();
     void drainWakeup();
 

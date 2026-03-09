@@ -91,6 +91,11 @@ int Epoll::wait(std::vector<epoll_event>& events, int timeoutMs)
     return ::epoll_wait(m_epFd, events.data(), static_cast<int>(events.size()), timeoutMs);
 }
 
+int Epoll::getEventFd() const
+{
+    return m_eventFd;
+}
+
 void Epoll::wakeup()
 {
     uint64_t v = 1;

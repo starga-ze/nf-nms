@@ -3,7 +3,7 @@
 #include "core/Core.h"
 #include "util/ThreadManager.h"
 #include "config/ConfigTypes.h"
-#include "ipc/IpcClient.h"
+#include "ipc/IpcHandler.h"
 
 #include <memory>
 
@@ -13,7 +13,6 @@ namespace nf::engined
 using LoggerConfig = nf::config::LoggerConfig;
 using IpcConfig = nf::config::IpcConfig;
 using ThreadManager = nf::util::ThreadManager;
-using IpcClient = nf::ipc::IpcClient;
 
 class CoreEngine : public nf::core::Core
 {
@@ -30,7 +29,7 @@ private:
     void initLogger();
     bool initThreadManager();
 
-    void initIpcClient();
+    void initIpcHandler();
 
     void startThreads();
 
@@ -40,7 +39,7 @@ private:
     IpcConfig m_ipcConfig;
     
     std::unique_ptr<ThreadManager> m_threadManager;
-    std::unique_ptr<IpcClient> m_ipcClient;
+    std::unique_ptr<IpcHandler> m_ipcHandler;
 };
 
 } // namespace nf::engined
