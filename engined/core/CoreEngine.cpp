@@ -1,7 +1,6 @@
 #include "CoreEngine.h"
 #include "util/Logger.h"
 
-
 #include <thread>
 
 namespace nf::engined
@@ -20,7 +19,7 @@ bool CoreEngine::onInit()
 
     initThreadManager();
 
-    initIpcHandler();
+    initIpcClient();
 
     return true;
 }
@@ -31,7 +30,8 @@ void CoreEngine::onLoop()
 
     while (!stopping())
     {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        sendClientHello();
+        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
     }
 }
 
@@ -88,16 +88,29 @@ bool CoreEngine::initThreadManager()
     return true;
 }
 
-void CoreEngine::initIpcHandler()
+void CoreEngine::initIpcClient()
 {
-    m_ipcHandler = std::make_unique<IpcHandler>(m_ipcConfig, nf::ipc::IpcDaemon::Engined);
+    m_ipcClient = std::make_unique<IpcClient>(m_ipcConfig, nf::ipc::IpcDaemon::Engined);
 }
 
 void CoreEngine::startThreads()
 {
-    m_threadManager->addThread("ipc_handler",
-            std::bind(&IpcHandler::start, m_ipcHandler.get()),
-            std::bind(&IpcHandler::stop, m_ipcHandler.get()));
+    m_threadManager->addThread("ipc_client",
+            std::bind(&IpcClient::start, m_ipcClient.get()),
+            std::bind(&IpcClient::stop, m_ipcClient.get()));
+}
+
+void CoreEngine::sendClientHello()
+{
+    std::string name = nf::ipc::daemonToStr(
+        (uint8_t)nf::ipc::IpcDaemon::Engined
+    );
+
+    m_ipcClient->sendString(
+        nf::ipc::IpcDaemon::Ipcd,
+        nf::ipc::IpcCmd::ClientHello,
+        name
+    );
 }
 
 } // namespace nf::ipcd

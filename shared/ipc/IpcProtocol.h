@@ -27,7 +27,9 @@ enum class IpcCmd : uint16_t
 {
     Unknown     = 0,
     ClientHello = 1,
-    Heartbeat   = 2,
+    ServerHello = 2,
+    HeartBeatReq = 3,
+    HeartBeatRes = 4,
 
     API = 255
 };
@@ -79,7 +81,7 @@ static const char* cmdToStr(uint16_t cmd)
     switch (static_cast<IpcCmd>(cmd))
     {
         case IpcCmd::ClientHello:   return "ClientHello";
-        case IpcCmd::Heartbeat:     return "Heartbeat";
+        case IpcCmd::ServerHello:     return "ServerHello";
         case IpcCmd::API:           return "API";
         default:                    return "Unknown";
     }

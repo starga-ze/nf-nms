@@ -100,7 +100,7 @@ void IpcRouter::handleHello(int fd,
     auto frame = buildFrame(
             IpcDaemon::Ipcd,
             daemonId,
-            IpcCmd::Heartbeat,
+            IpcCmd::ServerHello,
             reinterpret_cast<const uint8_t*>("hello-ack"),
             sizeof("hello-ack") - 1);
 
