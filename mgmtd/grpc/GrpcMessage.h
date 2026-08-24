@@ -66,6 +66,120 @@ struct GrpcMessage
         return out;
     }
 
+    // Benchtest. `datasetId` names the set; the rest are the upload's file and the listing's
+    // filters. Kept as named fields for the reason the chat ones are: there are a few of them,
+    // not twenty, and an opaque buffer would cost a serialize/parse pair to hide nothing.
+    std::int64_t datasetId{0};
+    std::string content;      // BenchtestUpload: the whole .jsonl
+    std::string filename;
+    std::string name;
+    std::string note;
+    std::string uploadedBy;
+    std::string category;
+    std::string verdict;
+    std::string language;
+    std::string technique;
+    std::string search;
+    std::int32_t offset{0};
+    std::int32_t limit{0};
+    std::string orderBy;
+    bool descending{false};
+
+    // Benchtest runs. `datasetId` and the filter fields above define a run's scope; `runId`/`seq`
+    // address one that already happened.
+    std::int64_t runId{0};
+    std::int32_t seq{0};
+    std::int32_t workers{0};
+    std::string cause;
+
+    static GrpcMessage benchtestRun(std::uint32_t ticket, std::int64_t datasetId,
+                                    std::string category, std::string verdict,
+                                    std::string language, std::string technique,
+                                    std::string search, std::int32_t workers, std::string label,
+                                    std::string note)
+    {
+        GrpcMessage out;
+        out.cmd = GrpcCmd::BenchtestRun;
+        out.ticket = ticket;
+        out.datasetId = datasetId;
+        out.category = std::move(category);
+        out.verdict = std::move(verdict);
+        out.language = std::move(language);
+        out.technique = std::move(technique);
+        out.search = std::move(search);
+        out.workers = workers;
+        out.name = std::move(label);
+        out.note = std::move(note);
+        return out;
+    }
+
+    static GrpcMessage benchtestRunRead(GrpcCmd cmd, std::uint32_t ticket, std::int64_t runId,
+                                        std::int64_t datasetId = 0, std::string cause = {},
+                                        std::int32_t seq = 0, std::int32_t offset = 0,
+                                        std::int32_t limit = 0)
+    {
+        GrpcMessage out;
+        out.cmd = cmd;
+        out.ticket = ticket;
+        out.runId = runId;
+        out.datasetId = datasetId;
+        out.cause = std::move(cause);
+        out.seq = seq;
+        out.offset = offset;
+        out.limit = limit;
+        return out;
+    }
+
+    static GrpcMessage benchtestUpload(std::uint32_t ticket, std::string content,
+                                       std::string filename, std::string name,
+                                       std::string note, std::string uploadedBy)
+    {
+        GrpcMessage out;
+        out.cmd = GrpcCmd::BenchtestUpload;
+        out.ticket = ticket;
+        out.content = std::move(content);
+        out.filename = std::move(filename);
+        out.name = std::move(name);
+        out.note = std::move(note);
+        out.uploadedBy = std::move(uploadedBy);
+        return out;
+    }
+
+    // Datasets / Delete / Summary / Export — everything whose whole input is an id (or, for the
+    // listing, a search string).
+    static GrpcMessage benchtest(GrpcCmd cmd, std::uint32_t ticket, std::int64_t datasetId = 0,
+                                 std::string search = {})
+    {
+        GrpcMessage out;
+        out.cmd = cmd;
+        out.ticket = ticket;
+        out.datasetId = datasetId;
+        out.search = std::move(search);
+        return out;
+    }
+
+    static GrpcMessage benchtestRows(std::uint32_t ticket, std::int64_t datasetId,
+                                     std::string category, std::string verdict,
+                                     std::string language, std::string technique,
+                                     std::string search, std::int32_t offset, std::int32_t limit,
+                                     std::string orderBy, bool descending)
+    {
+        GrpcMessage out;
+        out.cmd = GrpcCmd::BenchtestRows;
+        out.ticket = ticket;
+        out.datasetId = datasetId;
+        out.category = std::move(category);
+        out.verdict = std::move(verdict);
+        out.language = std::move(language);
+        out.technique = std::move(technique);
+        out.search = std::move(search);
+        out.offset = offset;
+        out.limit = limit;
+        out.orderBy = std::move(orderBy);
+        out.descending = descending;
+        return out;
+    }
+
     static GrpcMessage corpus(GrpcCmd cmd, std::uint32_t ticket, std::string scope = {},
                               std::string docset = {})
     {

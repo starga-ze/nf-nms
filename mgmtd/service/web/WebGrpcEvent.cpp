@@ -18,6 +18,20 @@ WebGrpcEventType webGrpcEventFor(GrpcCmd cmd) noexcept
     case GrpcCmd::CorpusStatus:  return WebGrpcEventType::CorpusStatusResponse;
     case GrpcCmd::CorpusDocuments: return WebGrpcEventType::CorpusDocumentList;
     case GrpcCmd::CorpusRefresh: return WebGrpcEventType::CorpusRefreshProgress;
+    case GrpcCmd::BenchtestDatasets:
+    case GrpcCmd::BenchtestUpload:
+    case GrpcCmd::BenchtestDelete:
+    case GrpcCmd::BenchtestSummary:
+    case GrpcCmd::BenchtestRows:
+    case GrpcCmd::BenchtestExport:
+    case GrpcCmd::BenchtestRunList:
+    case GrpcCmd::BenchtestRunInfo:
+    case GrpcCmd::BenchtestCases:
+    case GrpcCmd::BenchtestCase:
+        return WebGrpcEventType::BenchtestResponse;
+    case GrpcCmd::BenchtestRun:  return WebGrpcEventType::BenchtestRunProgress;
+    case GrpcCmd::BenchtestCancel: break;
+    case GrpcCmd::CorpusCancel:  break;
     case GrpcCmd::Unknown:       break;
     }
     return WebGrpcEventType::Unknown;
@@ -68,6 +82,7 @@ void WebGrpcEvent::dispatch(MgmtdServiceManager& serviceManager)
     // both are "one JSON document, collected once by whoever asked".
     case WebGrpcEventType::CorpusStatusResponse:
     case WebGrpcEventType::CorpusDocumentList:
+    case WebGrpcEventType::BenchtestResponse:
         serviceManager.setChatResult(m_ticket, std::move(m_json));
         return;
 
@@ -87,6 +102,25 @@ void WebGrpcEvent::dispatch(MgmtdServiceManager& serviceManager)
         }
         LOG_DEBUG("tech-doc progress event (final={}): {}", finished, m_json.substr(0, 120));
         serviceManager.setCorpusProgress(std::move(m_json), finished);
+        return;
+    }
+
+    // Same reasoning as above, on its own slot.
+    case WebGrpcEventType::BenchtestRunProgress:
+    {
+        const nlohmann::json body = nlohmann::json::parse(m_json, nullptr, false);
+        const bool finished = body.is_discarded() || body.value("final", false);
+        if (body.is_discarded())
+        {
+            LOG_WARN("unparseable benchtest progress from pretzel-ai; ending the run");
+        }
+        // A per-case message queues; everything else is run-level state and overwrites the slot.
+        // Both, for a case message: the slot carries the running totals the header reads.
+        if (!body.is_discarded() && body.value("stage", std::string()) == "case")
+        {
+            serviceManager.queueBenchtestCase(m_json);
+        }
+        serviceManager.setBenchtestProgress(std::move(m_json), finished);
         return;
     }
 

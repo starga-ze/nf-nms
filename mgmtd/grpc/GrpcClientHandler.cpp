@@ -143,6 +143,53 @@ struct GrpcClientHandler::Impl
         case GrpcCmd::CorpusDocuments:
             json = client.corpusDocuments(task.message, task.docset, error);
             break;
+        case GrpcCmd::BenchtestDatasets:
+            json = client.benchtestDatasets(task.search, error);
+            break;
+        case GrpcCmd::BenchtestSummary:
+            json = client.benchtestSummary(task.datasetId, error);
+            break;
+        case GrpcCmd::BenchtestExport:
+        {
+            // The only answer here that is a file rather than a document. It still travels the
+            // ticket path as JSON — the controller unwraps it and serves the bytes — because a
+            // second delivery mechanism for one call would be a transport with two shapes.
+            auto out = client.benchtestExport(task.datasetId);
+            error = out.error;
+            json = nlohmann::json{{"filename", out.filename},
+                                  {"content", out.content},
+                                  {"error", out.error}}.dump();
+            break;
+        }
+        case GrpcCmd::BenchtestRows:
+            json = client.benchtestRows(task.datasetId, task.category, task.verdict,
+                                        task.language, task.technique, task.search,
+                                        task.offset, task.limit, task.orderBy,
+                                        task.descending, error);
+            break;
+        case GrpcCmd::BenchtestUpload:
+            json = client.benchtestUpload(task.content, task.filename, task.name, task.note,
+                                          task.uploadedBy, error);
+            break;
+        case GrpcCmd::BenchtestDelete:
+            json = client.benchtestDelete(task.datasetId, error);
+            break;
+        case GrpcCmd::BenchtestRunList:
+            json = client.benchtestRuns(task.datasetId, task.limit, error);
+            break;
+        case GrpcCmd::BenchtestRunInfo:
+            json = client.benchtestRunInfo(task.runId, task.category, task.verdict,
+                                           task.language, task.technique, task.search, error);
+            break;
+        case GrpcCmd::BenchtestCases:
+            json = client.benchtestCases(task.runId, task.cause, task.category, task.verdict,
+                                         task.language, task.technique, task.search,
+                                         task.orderBy, task.descending,
+                                         task.offset, task.limit, error);
+            break;
+        case GrpcCmd::BenchtestCase:
+            json = client.benchtestCase(task.runId, task.seq, error);
+            break;
         default:
             error = "unroutable command";
             break;
@@ -170,20 +217,25 @@ struct GrpcClientHandler::Impl
     {
         std::string error;
         bool sawFinal = false;
+        const char* what = task.cmd == GrpcCmd::BenchtestRun ? "benchtest run" : "tech-doc refresh";
 
-        client.refreshCorpus(task.message,
-                             [this, &task, &sawFinal](const std::string& json)
-                             {
-                                 // The serializer puts a space after the colon ("final": true),
-                                 // so a pattern without one never matches and every completed
-                                 // crawl reported itself as a stream that died.
-                                 if (json.find("\"final\"") != std::string::npos
-                                     && json.find("true", json.find("\"final\"")) != std::string::npos)
-                                     sawFinal = true;
-                                 LOG_DEBUG("tech-doc progress: {}", json.substr(0, 160));
-                                 report(task.cmd, task.ticket, json);
-                             },
-                             error);
+        // The serializer puts a space after the colon ("final": true), so a pattern without one
+        // never matches and every completed stream reported itself as one that died.
+        auto onProgress = [this, &task, &sawFinal, what](const std::string& json)
+        {
+            if (json.find("\"final\"") != std::string::npos
+                && json.find("true", json.find("\"final\"")) != std::string::npos)
+                sawFinal = true;
+            LOG_DEBUG("{} progress: {}", what, json.substr(0, 160));
+            report(task.cmd, task.ticket, json);
+        };
+
+        if (task.cmd == GrpcCmd::BenchtestRun)
+            client.benchtestRun(task.datasetId, task.category, task.verdict, task.language,
+                                task.technique, task.search, task.workers, task.name,
+                                task.note, onProgress, error);
+        else
+            client.refreshCorpus(task.message, onProgress, error);
 
         // Only synthesize a terminal message when the server never sent one; otherwise the
         // server's own final message is the more accurate account of what happened.
@@ -196,22 +248,22 @@ struct GrpcClientHandler::Impl
                                    || error.find("Cancelled") != std::string::npos;
             if (cancelled)
             {
-                LOG_INFO("tech-doc refresh cancelled");
+                LOG_INFO("{} cancelled", what);
                 report(task.cmd, task.ticket,
                        R"({"stage":"cancelled","final":true})");
             }
             else
             {
-                LOG_WARN("tech-doc refresh ended without a final message: {}",
+                LOG_WARN("{} ended without a final message: {}", what,
                          error.empty() ? "stream closed" : error);
                 report(task.cmd, task.ticket,
                        unreachableDoc(task.cmd,
-                                      error.empty() ? "the refresh stream closed" : error));
+                                      error.empty() ? "the stream closed" : error));
             }
         }
         else
         {
-            LOG_INFO("tech-doc refresh finished");
+            LOG_INFO("{} finished", what);
         }
 
         streaming.store(false);
@@ -289,6 +341,8 @@ void GrpcClientHandler::setResultSink(ResultSink sink)
 
 void GrpcClientHandler::egress(GrpcMessage message)
 {
+    LOG_INFO("Egress: {}", grpcCmdToStr(message.cmd));
+
     // Cancel does not queue. Every other command waits its turn behind the worker pool, but a
     // cancel that waited would be a cancel that arrives after the thing it was cancelling — and
     // the operator pressed it because they want the crawl to stop now.
@@ -296,6 +350,12 @@ void GrpcClientHandler::egress(GrpcMessage message)
     {
         LOG_INFO("cancelling the in-flight tech-doc refresh");
         m_impl->client.cancelRefresh();
+        return;
+    }
+    if (message.cmd == GrpcCmd::BenchtestCancel)
+    {
+        LOG_INFO("cancelling the in-flight benchtest run");
+        m_impl->client.cancelBenchtestRun();
         return;
     }
 

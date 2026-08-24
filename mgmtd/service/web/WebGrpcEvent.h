@@ -26,6 +26,13 @@ enum class WebGrpcEventType : std::uint32_t
     CorpusStatusResponse = 3,   // store snapshot read         → TechDocController
     CorpusRefreshProgress = 4,  // one progress message        → TechDocController
     CorpusDocumentList = 5,     // one book's documents        → TechDocController
+    // Every benchtest call answers once and is collected once, so they share a single event type
+    // rather than one each: the controller that polls the ticket already knows what it asked for,
+    // and a type per call would be six names carrying no information.
+    BenchtestResponse = 6,      // any benchtest answer        → BenchtestController
+    // A run reports many times and is read by any number of polls, so it overwrites one live slot
+    // rather than resolving a ticket — the same shape a corpus refresh has.
+    BenchtestRunProgress = 7,   // one run message             → BenchtestController
 };
 
 // Maps the call that was made to the answer it produces. Kept beside the enum so adding a call

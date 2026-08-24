@@ -198,6 +198,41 @@ WebService::Resolved WebService::resolve(const std::string& method, const std::s
             Match::Exact,  WebRoute::TechDocProgress,   Access::Authenticated, false},
         {"POST", "/api/techdoc/cancel",
             Match::Exact,  WebRoute::TechDocCancel,     Access::Authenticated, false},
+        // Benchtest sets. The three /datasets entries differ by method, so none can shadow
+        // another; /result carries ?ticket= and the rest carry ?id=, so all are Prefix.
+        {"GET",  "/api/benchtest/datasets",
+            Match::Prefix, WebRoute::BenchtestDatasets,  Access::Authenticated, false},
+        {"POST", "/api/benchtest/datasets",
+            Match::Prefix, WebRoute::BenchtestUpload,    Access::Authenticated, false},
+        {"DELETE", "/api/benchtest/datasets",
+            Match::Prefix, WebRoute::BenchtestDelete,    Access::Authenticated, false},
+        {"GET",  "/api/benchtest/summary",
+            Match::Prefix, WebRoute::BenchtestSummary,   Access::Authenticated, false},
+        {"GET",  "/api/benchtest/rows",
+            Match::Prefix, WebRoute::BenchtestRows,      Access::Authenticated, false},
+        {"GET",  "/api/benchtest/export",
+            Match::Prefix, WebRoute::BenchtestExport,    Access::Authenticated, false},
+        {"GET",  "/api/benchtest/result",
+            Match::Prefix, WebRoute::BenchtestResult,    Access::Authenticated, false},
+
+        // Runs. The two longer /run/ paths are Exact and come first: /run is Prefix and would
+        // otherwise claim both of them.
+        {"GET",  "/api/benchtest/run/progress",
+            Match::Exact,  WebRoute::BenchtestRunProgress, Access::Authenticated, false},
+        {"POST", "/api/benchtest/run/cancel",
+            Match::Exact,  WebRoute::BenchtestRunCancel,   Access::Authenticated, false},
+        // "runs" before "run": Prefix matching would let the shorter path claim the longer one.
+        {"GET",  "/api/benchtest/runs",
+            Match::Prefix, WebRoute::BenchtestRuns,        Access::Authenticated, false},
+        {"GET",  "/api/benchtest/run",
+            Match::Prefix, WebRoute::BenchtestRunInfo,     Access::Authenticated, false},
+        {"POST", "/api/benchtest/run",
+            Match::Prefix, WebRoute::BenchtestRunStart,    Access::Authenticated, false},
+        {"GET",  "/api/benchtest/cases",
+            Match::Prefix, WebRoute::BenchtestCases,       Access::Authenticated, false},
+        {"GET",  "/api/benchtest/case",
+            Match::Prefix, WebRoute::BenchtestCase,        Access::Authenticated, false},
+
         {"GET",  "/api/techdoc/documents",
             Match::Prefix, WebRoute::TechDocDocuments,  Access::Authenticated, false},
 
@@ -312,6 +347,21 @@ void WebService::route(MgmtdServiceManager& sm, const Request& req, Response& re
     case WebRoute::TechDocProgress:    return m_techDocController.progress(sm, req, resp);
     case WebRoute::TechDocCancel:      return m_techDocController.cancel(sm, req, resp);
     case WebRoute::TechDocDocuments:   return m_techDocController.documents(sm, req, resp);
+
+    case WebRoute::BenchtestDatasets:  return m_benchtestController.datasets(sm, req, resp);
+    case WebRoute::BenchtestUpload:    return m_benchtestController.upload(sm, req, resp);
+    case WebRoute::BenchtestDelete:    return m_benchtestController.remove(sm, req, resp);
+    case WebRoute::BenchtestSummary:   return m_benchtestController.summary(sm, req, resp);
+    case WebRoute::BenchtestRows:      return m_benchtestController.rows(sm, req, resp);
+    case WebRoute::BenchtestExport:    return m_benchtestController.exportSet(sm, req, resp);
+    case WebRoute::BenchtestResult:    return m_benchtestController.result(sm, req, resp);
+    case WebRoute::BenchtestRunStart:  return m_benchtestController.runStart(sm, req, resp);
+    case WebRoute::BenchtestRunProgress: return m_benchtestController.runProgress(sm, req, resp);
+    case WebRoute::BenchtestRunCancel: return m_benchtestController.runCancel(sm, req, resp);
+    case WebRoute::BenchtestRuns:      return m_benchtestController.runs(sm, req, resp);
+    case WebRoute::BenchtestRunInfo:   return m_benchtestController.runInfo(sm, req, resp);
+    case WebRoute::BenchtestCases:     return m_benchtestController.cases(sm, req, resp);
+    case WebRoute::BenchtestCase:      return m_benchtestController.caseDetail(sm, req, resp);
 
     case WebRoute::Logs:               return m_logsController.list(sm, req, resp);
 

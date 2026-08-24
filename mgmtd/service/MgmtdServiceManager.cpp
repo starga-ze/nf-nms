@@ -334,6 +334,59 @@ void MgmtdServiceManager::setCorpusProgress(std::string json, bool finished)
     }
 }
 
+bool MgmtdServiceManager::beginBenchtestRun()
+{
+    if (m_benchtestRunning)
+    {
+        return false;
+    }
+    m_benchtestRunning = true;
+    // Cleared for the same reason the corpus slot is: the previous run's final message would
+    // otherwise be served to the first poll of this one, which reads as a run that finished
+    // before it started.
+    m_benchtestProgress.clear();
+    m_benchtestCases.clear();
+    return true;
+}
+
+void MgmtdServiceManager::setBenchtestProgress(std::string json, bool finished)
+{
+    m_benchtestProgress = std::move(json);
+    if (finished)
+    {
+        m_benchtestRunning = false;
+    }
+}
+
+void MgmtdServiceManager::queueBenchtestCase(std::string json)
+{
+    constexpr std::size_t kMaxQueued = 2000;
+    if (m_benchtestCases.size() >= kMaxQueued)
+    {
+        // Drop the oldest rather than the newest: a console that fell behind wants to catch up to
+        // where the run is now, not to read a transcript from ten minutes ago.
+        m_benchtestCases.erase(m_benchtestCases.begin());
+    }
+    m_benchtestCases.push_back(std::move(json));
+}
+
+std::vector<std::string> MgmtdServiceManager::takeBenchtestCases()
+{
+    std::vector<std::string> out;
+    out.swap(m_benchtestCases);
+    return out;
+}
+
+const std::string& MgmtdServiceManager::benchtestProgress() const
+{
+    return m_benchtestProgress;
+}
+
+bool MgmtdServiceManager::benchtestRunning() const
+{
+    return m_benchtestRunning;
+}
+
 const std::string& MgmtdServiceManager::corpusProgress() const
 {
     return m_corpusProgress;

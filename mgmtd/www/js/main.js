@@ -130,6 +130,15 @@
       icon: `<path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/>
              <path d="M18.5 15.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z"/>`,
     },
+    {
+      // The prompt sets the Assistant's guardrail is measured against. It sits beside the Assistant
+      // rather than under Insight because it is the same subject read from the other end: one page
+      // is the traffic, the other is the set the traffic is scored on.
+      type: 'link', id: 'benchtest', label: 'Benchtest', href: 'benchtest',
+      icon: `<path d="M4 20h16"/><rect x="5" y="11" width="3.6" height="6" rx="1"/>
+             <rect x="10.2" y="7" width="3.6" height="10" rx="1"/>
+             <rect x="15.4" y="13" width="3.6" height="4" rx="1"/>`,
+    },
 
     { type: 'section', label: 'Insight' },
     {
@@ -205,6 +214,12 @@
   const PAGES = {
     'home':            { title: 'Home' },
     'chatbot':         { title: 'Assistant' },
+    // Two tabs, plain navigation like the audit page: Test browses the set and launches a run,
+    // Result reads runs that already happened. A run's result has to outlive the window it was
+    // watched in — the modal is a view of a run in flight, not the only place its numbers exist.
+    'benchtest':       { title: 'Benchtest', tabs: [
+                           { id: 'test',   label: 'Test'   },
+                           { id: 'result', label: 'Result' } ] },
     // The group is chosen in the sidebar flyout (SETTINGS_GROUPS); the topbar shows that
     // group's name and one row of its tabs.
     'settings':        { title: 'Configuration', groups: SETTINGS_GROUPS },
@@ -899,6 +914,32 @@
       if (h) return `${h}h ${m}m ${s}s`;
       return `${m}m ${s}s`;
     },
+    // Dispatch-and-poll, the shape every mgmtd call that crosses to pretzel-ai has: the POST/GET
+    // returns 202 {ticket} immediately and the answer is collected from a result endpoint. mgmtd
+    // runs one event loop, so a call that blocked it for the length of a gRPC round trip would
+    // freeze the console — the ticket is what keeps that thread free.
+    //
+    // Resolves with the answer document. Rejects on transport failure or when the answer never
+    // arrives; `tries` × `everyMs` is the ceiling, and it is deliberately generous because the
+    // work on the far side is a database read whose tail is a cold connection, not a crawl.
+    async pollTicket(dispatchUrl, resultUrl, opts) {
+      const o = Object.assign({ everyMs: 300, tries: 60 }, opts || {});
+      const first = await this.fetchJSON(dispatchUrl, o.dispatch);
+      if (!first) return null;                       // 401: fetchJSON already redirected
+      if (first.error) return first;                 // refused before dispatch; it is the answer
+      const ticket = first.ticket;
+      if (!ticket) throw new Error('no ticket');
+
+      const url = resultUrl + (resultUrl.indexOf('?') === -1 ? '?' : '&') + 'ticket=' + ticket;
+      for (let i = 0; i < o.tries; i++) {
+        await new Promise(r => setTimeout(r, o.everyMs));
+        const got = await this.fetchJSON(url);
+        if (!got) return null;
+        if (got.status !== 'pending') return got;
+      }
+      throw new Error('timed out waiting for an answer');
+    },
+
     async fetchJSON(url, opts) {
       const r = await fetch(url, Object.assign({ credentials: 'same-origin' }, opts));
       if (r.status === 401) { window.location.href = '/'; return null; }

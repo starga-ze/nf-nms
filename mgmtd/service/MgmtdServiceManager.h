@@ -113,6 +113,22 @@ public:
     const std::string& corpusProgress() const;
     bool corpusRefreshing() const;
 
+    // A benchtest run, in the same shape and for the same reasons. Kept as its own slot rather
+    // than sharing the corpus one: the two are unrelated operations and a console watching a run
+    // must not be handed a crawl's progress because a crawl happened to start.
+    bool beginBenchtestRun();                       // false: one is already running
+    void setBenchtestProgress(std::string json, bool finished);
+    const std::string& benchtestProgress() const;
+    bool benchtestRunning() const;
+
+    // Cases finish faster than the console polls, so a slot holding only the latest message loses
+    // most of them — a 1,500-prompt run rendered about one line in ten. They queue here instead
+    // and a poll takes the whole batch, which is why the list can show every case rather than a
+    // sample of them. Bounded: a reader who left the tab for ten minutes wants the tail, not a
+    // replay, and an unbounded queue is a memory leak with a nice name.
+    void queueBenchtestCase(std::string json);
+    std::vector<std::string> takeBenchtestCases();
+
     // The composed site topology, as topologyd last answered. mgmtd owns no topology logic — it asks
     // and it serves. Kept rather than awaited because an HTTP response here is built synchronously:
     // holding one open for a cross-daemon round trip would block the loop every other daemon's
@@ -164,6 +180,9 @@ private:
     std::unordered_map<std::uint32_t, std::string> m_chatResults;
     std::unordered_map<std::uint32_t, std::string> m_chatPartials;
     std::string m_corpusProgress;
+    std::string m_benchtestProgress;
+    bool m_benchtestRunning{false};
+    std::vector<std::string> m_benchtestCases;
     bool m_corpusRefreshing{false};
     std::unordered_map<std::uint32_t, std::string> m_retrievalResults;
 

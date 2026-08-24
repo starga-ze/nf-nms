@@ -2,6 +2,7 @@
 
 #include "grpc/GrpcMessage.h"
 
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <string>
@@ -72,6 +73,62 @@ public:
     void refreshCorpus(const std::string& scope,
                        const std::function<void(const std::string&)>& on_progress,
                        std::string& error);
+
+    // --- Benchtest sets ------------------------------------------------------------------------
+    //
+    // Same rendering choice as the corpus calls: the server's reply comes back as JSON rather than
+    // as a struct, so a field added on the pretzel-ai side reaches the console without a change
+    // here. `error` is set for a transport failure; a call that reached the server and was refused
+    // by it reports that inside the JSON, because "the file had a bad line on 12" is an answer and
+    // not a failure of the call.
+
+    std::string benchtestDatasets(const std::string& search, std::string& error);
+    std::string benchtestSummary(std::int64_t datasetId, std::string& error);
+    std::string benchtestRows(std::int64_t datasetId, const std::string& category,
+                              const std::string& verdict, const std::string& language,
+                              const std::string& technique, const std::string& search,
+                              std::int32_t offset, std::int32_t limit,
+                              const std::string& orderBy, bool descending, std::string& error);
+    std::string benchtestUpload(const std::string& content, const std::string& filename,
+                                const std::string& name, const std::string& note,
+                                const std::string& uploadedBy, std::string& error);
+    std::string benchtestDelete(std::int64_t datasetId, std::string& error);
+
+    // The whole set as .jsonl. Returns the file's bytes in `content` rather than as JSON: this is
+    // the one call whose answer is a download and not something the console renders.
+    struct Export
+    {
+        std::string content;
+        std::string filename;
+        std::string error;
+    };
+    Export benchtestExport(std::int64_t datasetId);
+
+    // --- Benchtest runs -------------------------------------------------------------------
+    //
+    // The run streams: on_progress is called once per message, and the caller cancels by letting
+    // the reader go — the server sees the dropped stream and marks the run cancelled, so this
+    // stops work on the appliance rather than merely stopping us listening to it.
+    void benchtestRun(std::int64_t datasetId, const std::string& category,
+                      const std::string& verdict, const std::string& language,
+                      const std::string& technique, const std::string& search,
+                      std::int32_t workers, const std::string& label, const std::string& note,
+                      const std::function<void(const std::string&)>& on_progress,
+                      std::string& error);
+    void cancelBenchtestRun();
+
+    std::string benchtestRuns(std::int64_t datasetId, std::int32_t limit, std::string& error);
+    std::string benchtestRunInfo(std::int64_t runId, const std::string& category,
+                                 const std::string& verdict, const std::string& language,
+                                 const std::string& technique, const std::string& search,
+                                 std::string& error);
+    std::string benchtestCases(std::int64_t runId, const std::string& cause,
+                               const std::string& category, const std::string& verdict,
+                               const std::string& language, const std::string& technique,
+                               const std::string& search, const std::string& orderBy,
+                               bool descending,
+                               std::int32_t offset, std::int32_t limit, std::string& error);
+    std::string benchtestCase(std::int64_t runId, std::int32_t seq, std::string& error);
 
     // Cancels the refresh currently in flight, from another thread. A no-op when none is running.
     // The server sees the cancelled stream and stops crawling (its generator checks is_active), so

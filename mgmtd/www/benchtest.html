@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Pretzel</title>
   <link rel="stylesheet" href="css/main.css" />
+  <link rel="stylesheet" href="css/benchtest.css" />
   <!-- Pre-paint: stamp the theme (and the collapsed rail) on <html> before the first frame, so the
        page never flashes the wrong palette on its way to the right one. -->
   <script>try{var t=localStorage.getItem('theme');if(t!=='dark'&&t!=='light')t=(window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light';document.documentElement.setAttribute('data-theme',t);if(localStorage.getItem('sidebarCollapsed')==='true')document.documentElement.classList.add('sb-init-collapsed')}catch(e){}</script>
@@ -29,25 +30,8 @@
 
 </div>
 <script src="js/main.js"></script>
-<!-- Column sort, per-column filters and search for every table below. Loads before the tab modules
-     because each one builds its table from it at module scope. -->
-<script src="js/table-tools.js"></script>
-<!-- Configuration is one page with two levels of tabs (see PAGES.settings in main.js). Every tab
-     module loads here: each renders into #contentBody only when its own tab is active, but keeps
-     its data + staged state resident so cross-references (site names, profile labels, endpoint
-     and object pickers) resolve from any tab and the Publish pending state spans all
-     domains — commit.js owns that registry, so it loads first. users/operation are read-only
-     tabs with no staging provider. Splitting these across pages would break the shared registry. -->
-<script src="js/commit.js"></script>
-<script src="js/sites.js"></script>
-<script src="js/config.js"></script>
-<script src="js/api-keys.js"></script>
-<script src="js/endpoints.js"></script>
-<script src="js/api-connectors.js"></script>
-<script src="js/ai-gateway.js"></script>
-<script src="js/users.js"></script>
-<script src="js/operation.js"></script>
-<script src="js/techdoc.js"></script>
-<script src="js/benchtest-card.js"></script>
+<script src="js/benchtest-run.js"></script>
+<script src="js/benchtest-result.js"></script>
+<script src="js/benchtest.js"></script>
 </body>
 </html>

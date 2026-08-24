@@ -3,6 +3,7 @@
 #include "service/web/controller/ApiController.h"
 #include "service/web/controller/AuthController.h"
 #include "service/web/controller/ChatController.h"
+#include "service/web/controller/BenchtestController.h"
 #include "service/web/controller/TechDocController.h"
 #include "service/web/controller/CollectionController.h"
 #include "service/web/controller/GatewayController.h"
@@ -93,6 +94,22 @@ enum class WebRoute
     TechDocCancel,    // POST /api/techdoc/cancel
     TechDocDocuments, // GET  /api/techdoc/documents?product=&docset=
 
+    // BenchtestController — the benchtest sets, read here and written from Operation.
+    BenchtestDatasets,   // GET    /api/benchtest/datasets?q=
+    BenchtestUpload,     // POST   /api/benchtest/datasets?filename=  (body is the .jsonl)
+    BenchtestDelete,     // DELETE /api/benchtest/datasets?id=
+    BenchtestSummary,    // GET    /api/benchtest/summary?id=
+    BenchtestRows,       // GET    /api/benchtest/rows?id=&…
+    BenchtestExport,     // GET    /api/benchtest/export?id=
+    BenchtestResult,     // GET    /api/benchtest/result?ticket=
+    BenchtestRunStart,   // POST   /api/benchtest/run?id=&…
+    BenchtestRunProgress,// GET    /api/benchtest/run/progress
+    BenchtestRunCancel,  // POST   /api/benchtest/run/cancel
+    BenchtestRuns,       // GET    /api/benchtest/runs?id=&limit=
+    BenchtestRunInfo,    // GET    /api/benchtest/run?run=
+    BenchtestCases,      // GET    /api/benchtest/cases?run=&cause=&offset=&limit=
+    BenchtestCase,       // GET    /api/benchtest/case?run=&seq=
+
     // LogsController.
     Logs,   // GET  /api/logs?…
 };
@@ -174,6 +191,7 @@ private:
     GatewayController m_gatewayController;
     ChatController m_chatController;
     TechDocController m_techDocController;
+    BenchtestController m_benchtestController;
     CollectionController m_collectionController;
     LogsController m_logsController;
 };

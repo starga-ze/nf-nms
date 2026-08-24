@@ -1,0 +1,972 @@
+/* benchtest.css — AI › Benchtest
+ *
+ * Two bands and a table. The header band carries the composition of the loaded generation, because
+ * a detection rate read without it is a number with no denominator; the table under it is a
+ * reading surface, so the prompt column gets the width and everything else is trimmed to a label.
+ * Every colour resolves through main.css tokens — this page has no palette of its own.
+ */
+
+/* The page is a set rail plus everything scoped to the set chosen in it. */
+.bt-page {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 18px 22px 26px;
+  min-width: 0;
+}
+
+.bt-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* ── Set rail ─────────────────────────────────────────────────────────────── */
+
+.bt-rail {
+  flex: 0 0 236px;
+  position: sticky;
+  top: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.bt-rail-h {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+}
+
+.bt-rail-n { font-variant-numeric: tabular-nums; }
+
+.bt-rail-list { max-height: calc(100vh - 210px); overflow-y: auto; }
+
+.bt-set {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 10px 12px;
+  border: 0;
+  border-bottom: 1px solid var(--border-soft, var(--border));
+  border-left: 3px solid transparent;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.bt-set:hover { background: var(--surface-2, rgba(127, 127, 127, 0.06)); }
+
+.bt-set.is-on {
+  border-left-color: var(--accent);
+  background: var(--accent-soft, rgba(127, 127, 127, 0.12));
+}
+
+.bt-set-name {
+  display: block;
+  font-size: 13px;
+  font-weight: 550;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bt-set-meta, .bt-set-when {
+  display: block;
+  font-size: 11px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.bt-set-meta { margin-top: 2px; }
+
+.bt-rail-empty { padding: 16px 12px; font-size: 12px; color: var(--text-dim); line-height: 1.6; }
+.bt-rail-empty p { margin: 0 0 8px; }
+.bt-rail-hint code { font-size: 11px; }
+
+.bt-rail-link {
+  display: inline-block;
+  margin-top: 4px;
+  color: var(--accent);
+  text-decoration: none;
+  font-size: 12px;
+}
+
+.bt-rail-link:hover { text-decoration: underline; }
+
+/* ── Header band ─────────────────────────────────────────────────────────── */
+
+.bm-head-idle { padding: 22px 18px; }
+
+.bm-note {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.bm-c-no {
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.bm-head {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  padding: 16px 18px;
+}
+
+.bm-head-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.bm-head-total {
+  font-size: 30px;
+  font-weight: 650;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.bm-head-sub {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.bm-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 22px;
+  margin: 0;
+}
+
+.bm-meta dt {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+}
+
+.bm-meta dd {
+  margin: 2px 0 0;
+  font-size: 13px;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.bm-breaks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 28px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.bm-break-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+}
+
+.bm-break-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* A chip is a filter, not a legend: it looks pressable and it toggles. */
+.bm-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 4px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-2, transparent);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.bm-chip:hover { border-color: var(--accent); }
+
+.bm-chip.is-on {
+  border-color: var(--accent);
+  background: var(--accent-soft, var(--surface-2));
+  color: var(--accent-strong, var(--text));
+}
+
+.bm-chip-k { font-weight: 550; }
+
+.bm-chip-n {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+}
+
+.bm-chip.is-on .bm-chip-n { color: inherit; }
+
+/* ── Filter bar ──────────────────────────────────────────────────────────── */
+
+.bm-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.bm-select,
+.bm-search {
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+
+.bm-search { flex: 1 1 260px; min-width: 180px; }
+
+.bm-select:focus,
+.bm-search:focus { outline: none; border-color: var(--accent); }
+
+.bm-clear {
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.bm-clear.is-off { opacity: 0.45; pointer-events: none; }
+
+.bm-count {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Table + drawer ──────────────────────────────────────────────────────── */
+
+.bm-body {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  min-width: 0;
+}
+
+.bm-table-wrap {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  overflow-x: auto;
+}
+
+.bm-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.bm-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  text-align: left;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-dim);
+  background: var(--surface);
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.bm-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-soft, var(--border));
+  vertical-align: top;
+}
+
+.bm-row { cursor: pointer; }
+.bm-row:hover { background: var(--surface-2, rgba(127, 127, 127, 0.06)); }
+.bm-row.is-sel { background: var(--accent-soft, rgba(127, 127, 127, 0.12)); }
+
+.bm-c-id code { font-size: 12px; white-space: nowrap; color: var(--text); }
+.bm-c-cat, .bm-c-lang { white-space: nowrap; }
+.bm-c-tech { white-space: nowrap; color: var(--text-dim); }
+.bm-c-det { white-space: nowrap; color: var(--text-dim); font-size: 12px; }
+
+/* The prompt is the reason the row is here, so it takes the slack and stays on one line. */
+.bm-c-prompt {
+  max-width: 0;
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-dim);
+}
+
+.bm-cat {
+  display: inline-block;
+  min-width: 18px;
+  text-align: center;
+  font-weight: 600;
+}
+
+/* Expected outcome, not a result. Two states only — an attack row expects block, a benign row
+   expects allow — and they are deliberately quiet: this is the set's own label, not a verdict. */
+.bm-exp {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.bm-exp.is-block { color: var(--danger, #b4443a); border-color: currentColor; }
+.bm-exp.is-allow { color: var(--text-dim); }
+
+.bm-empty {
+  padding: 34px 16px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.bm-empty-err { color: var(--danger, #b4443a); }
+
+.bm-pager {
+  display: flex;
+  gap: 6px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--border);
+}
+
+.bm-page {
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.bm-page:disabled { opacity: 0.4; cursor: default; }
+.bm-page:not(:disabled):hover { border-color: var(--accent); }
+
+/* ── Detail drawer ────────────────────────────────────────────────────────── */
+/* Slides in from the right over the table, the same way the API Collection drawer does — the row
+   stays where it was, so the reader keeps their place in the list they were scanning. Mounted on
+   <body> and toggled with .open rather than rendered into the page: this module repaints
+   #contentBody wholesale, and a panel rebuilt on every repaint has nothing to animate. */
+.bt-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(560px, 92vw);
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 14px 18px 20px;
+  overflow-y: auto;
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  transform: translateX(101%);
+  transition: transform var(--tr);
+  visibility: hidden;
+}
+
+.bt-drawer.open { transform: none; visibility: visible; }
+
+.bt-drawer-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 59;
+  background: rgba(9, 12, 20, 0.34);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--tr);
+}
+
+.bt-drawer-overlay.open { opacity: 1; pointer-events: auto; }
+
+.bm-drawer-h {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+/* The id is an identifier, not a code sample. It was a <code>, which picked up the monospace
+   stack and read as a different kind of thing from every other heading in the console. */
+.bm-drawer-id {
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+
+.bm-drawer-x {
+  border: 0;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+}
+
+.bm-drawer-x:hover { color: var(--text); }
+
+.bm-drawer-meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 14px;
+  margin: 12px 0 0;
+}
+
+.bm-drawer-meta dt {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+}
+
+.bm-drawer-meta dd {
+  margin: 1px 0 0;
+  font-size: 12px;
+  color: var(--text);
+  word-break: break-word;
+}
+
+.bm-drawer-label {
+  margin: 16px 0 6px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+}
+
+/* The prompt is multi-line and its line breaks carry meaning — the work-item shape is what the
+   guardrail is reacting to — so it is never reflowed. */
+.bm-prompt {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2, transparent);
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text);
+}
+
+@media (max-width: 1280px) {
+  .bt-page { flex-direction: column; }
+  .bt-rail { flex: 1 1 auto; width: 100%; position: static; }
+  .bt-rail-list { max-height: 240px; }
+  .bt-main { width: 100%; }
+}
+
+/* The import-rejection list, shown in Operation's modal. Line-numbered problems are only useful
+   if they are readable as a list — one per line, monospaced, and scrollable rather than clipped. */
+.bt-problems {
+  margin: 10px 0 0;
+  padding: 10px 12px 10px 28px;
+  max-height: 260px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2, transparent);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text);
+}
+
+.bt-problems li { word-break: break-word; }
+
+/* Sortable headers. The active one keeps its arrow so the order is readable without clicking to
+   find out — a table that only shows its sort on hover is a table you have to poke at. */
+.bm-th-sort { cursor: pointer; user-select: none; white-space: nowrap; }
+.bm-th-sort:hover { color: var(--text); }
+.bm-th-sort.is-on { color: var(--accent); }
+
+/* Selected-of-total. The selected half is the number a Test run would act on, so it carries the
+   accent; the total is context and steps back rather than competing with it. */
+.bm-sel { color: var(--accent); }
+
+.bm-of {
+  color: var(--text-dim);
+  font-size: 0.62em;
+  font-weight: 500;
+  margin-left: 1px;
+}
+
+/* All sits ahead of the values it clears, and reads as a word rather than as another value. */
+.bm-chip-all { font-variant: small-caps; letter-spacing: 0.02em; }
+
+/* ── Test button ──────────────────────────────────────────────────────────── */
+
+.bm-test {
+  height: 32px;
+  padding: 0 16px;
+  border: 1px solid var(--accent);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 550;
+  cursor: pointer;
+}
+
+.bm-test:hover:not(:disabled) { background: var(--accent-soft, transparent); }
+.bm-test:disabled { opacity: 0.4; cursor: default; border-color: var(--border); color: var(--text-dim); }
+
+/* ── Run window ───────────────────────────────────────────────────────────── */
+
+.btr-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 900;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3vh 3vw;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.btr-win {
+  display: flex;
+  flex-direction: column;
+  width: min(1180px, 100%);
+  max-height: 94vh;
+  transition: width var(--tr);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+/* Before a run there is nothing but the form, and the window sizes to it. */
+.btr-win.is-compact { width: min(620px, 100%); }
+.btr-win.is-compact .btr-form { padding: 30px 24px 34px; }
+
+.btr-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+}
+
+.btr-title { font-size: 15px; font-weight: 600; color: var(--text); }
+.btr-scope { margin-top: 2px; font-size: 12px; color: var(--text-dim); }
+
+.btr-head-r { display: flex; align-items: center; gap: 10px; }
+.btr-count { font-size: 12px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+
+.btr-btn {
+  height: 30px;
+  padding: 0 16px;
+  border-radius: 7px;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 550;
+  cursor: pointer;
+}
+
+.btr-stop { background: transparent; color: var(--danger, #b4443a); border-color: currentColor; }
+
+.btr-x {
+  border: 0;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+}
+
+.btr-x:hover { color: var(--text); }
+
+/* A progress bar rather than a spinner: a run is minutes long and "how much is left" is the
+   question, which a spinner cannot answer. */
+.btr-bar { height: 2px; background: var(--border); }
+.btr-bar-fill { height: 100%; background: var(--accent); transition: width 0.3s ease; }
+
+.btr-err {
+  padding: 8px 18px;
+  font-size: 12px;
+  color: var(--danger, #b4443a);
+  border-bottom: 1px solid var(--border);
+}
+
+.btr-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 26px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+}
+
+.btr-stat-k {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+}
+
+.btr-stat-v {
+  font-size: 26px;
+  font-weight: 650;
+  line-height: 1.15;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The adjusted rate is the one to read: attacks the model itself refused never produced anything
+   for the profile to scan, so leaving them in the denominator scores the guardrail for the
+   model's caution. */
+.btr-stat-v.is-adj { color: var(--accent); }
+.btr-stat-n { font-size: 11px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.btr-stat-wide { margin-left: auto; text-align: right; }
+
+.btr-tallies {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--border);
+}
+
+.btr-tally {
+  padding: 2px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 11px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.btr-tally b { color: var(--text); }
+.btr-tally.is-ok   { border-color: var(--ok, #3f8f5f); color: var(--ok, #3f8f5f); }
+.btr-tally.is-warn { border-color: var(--warn, #b8862b); color: var(--warn, #b8862b); }
+.btr-tally.is-bad  { border-color: var(--danger, #b4443a); color: var(--danger, #b4443a); }
+
+.btr-body { display: flex; min-height: 0; flex: 1 1 auto; }
+.btr-list-wrap { flex: 1 1 auto; min-width: 0; display: flex; }
+
+.btr-lines {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 8px 0;
+  font-size: 12.5px;
+  line-height: 1.75;
+  /* Not a monospace block. The columns are held by fixed widths below, and the cause labels are
+     Korean — a monospace stack has no Korean face, so every one of them fell through to a
+     different font than the numbers beside it. Tabular figures keep the digits aligned without
+     making the words look borrowed from somewhere else. */
+  font-variant-numeric: tabular-nums;
+}
+
+.btr-line {
+  display: flex;
+  gap: 14px;
+  padding: 1px 18px;
+  cursor: default;
+  white-space: nowrap;
+}
+
+.btr-line:hover { background: var(--surface-2, rgba(127, 127, 127, 0.07)); }
+
+/* One size across the row. Mixing 11.5 and 12.5 split every line into two visual halves — the
+   monospace fields read as a caption pasted next to the words rather than as the same line. The
+   mono face stays only where the content is genuinely a code; it is set at the row's size and let
+   to sit slightly tighter, which is enough to tell the two apart without a size change. */
+.btr-line > span { font-size: 12.5px; }
+
+.btr-seq { color: var(--text-dim); min-width: 78px; text-align: right; }
+
+.btr-id {
+  min-width: 118px;
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: -0.02em;
+}
+
+.btr-cause { min-width: 116px; font-weight: 600; }
+.btr-verdict { min-width: 58px; color: var(--text-dim); }
+
+.btr-det {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-dim);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: -0.02em;
+}
+
+.btr-ms { color: var(--text-dim); min-width: 64px; text-align: right; }
+
+.btr-line.is-ok   .btr-cause { color: var(--ok, #3f8f5f); }
+.btr-line.is-warn .btr-cause { color: var(--warn, #b8862b); }
+.btr-line.is-bad  .btr-cause { color: var(--danger, #b4443a); }
+.btr-line.is-skip .btr-cause { color: var(--text-dim); }
+
+.btr-detail {
+  flex: 0 0 400px;
+  border-left: 1px solid var(--border);
+  overflow-y: auto;
+  padding: 14px 16px 18px;
+}
+
+.btr-detail-meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 14px;
+  margin: 0 0 12px;
+}
+
+.btr-detail-meta dt {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+}
+
+.btr-detail-meta dd { margin: 1px 0 0; font-size: 12px; color: var(--text); word-break: break-word; }
+
+.btr-detail-k {
+  margin: 14px 0 5px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+}
+
+.btr-pre {
+  margin: 0;
+  padding: 9px 11px;
+  max-height: 300px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-2, transparent);
+  font-size: 11px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text);
+}
+
+.btr-empty { padding: 30px 18px; font-size: 12px; color: var(--text-dim); line-height: 1.6; }
+.btr-empty-err { color: var(--danger, #b4443a); }
+
+@media (max-width: 1000px) {
+  .btr-body { flex-direction: column; }
+  .btr-detail { flex: 1 1 auto; border-left: 0; border-top: 1px solid var(--border); }
+}
+
+/* ── Result tab ───────────────────────────────────────────────────────────── */
+
+.btres-rates { display: flex; gap: 32px; }
+.btres-rate-k {
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim);
+}
+.btres-rate-v {
+  font-size: 30px; font-weight: 650; line-height: 1.1; letter-spacing: -0.02em;
+  color: var(--text); font-variant-numeric: tabular-nums;
+}
+/* The adjusted rate is the one to read — see the note in benchtest-result.js. */
+.btres-rate-v.is-adj { color: var(--accent); }
+.btres-rate-n { margin-top: 2px; font-size: 11px; color: var(--text-dim); }
+
+.btres-status {
+  margin-left: 6px; padding: 0 6px; border-radius: 999px; border: 1px solid currentColor;
+  font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600;
+}
+.btres-status.is-done      { color: var(--ok, #3f8f5f); }
+.btres-status.is-running   { color: var(--accent); }
+.btres-status.is-cancelled { color: var(--text-dim); }
+.btres-status.is-failed    { color: var(--danger, #b4443a); }
+
+/* Outcome chips double as the case filter, so they look pressable rather than like a legend. */
+.btres-tally {
+  padding: 4px 9px; border: 1px solid var(--border); border-radius: 999px;
+  background: transparent; color: var(--text-dim); font: inherit; font-size: 12px;
+  cursor: pointer; font-variant-numeric: tabular-nums;
+}
+.btres-tally b { color: var(--text); }
+.btres-tally:hover { border-color: var(--accent); }
+.btres-tally.is-on { border-color: var(--accent); background: var(--accent-soft, transparent); }
+.btres-tally.is-ok   { color: var(--ok, #3f8f5f); }
+.btres-tally.is-warn { color: var(--warn, #b8862b); }
+.btres-tally.is-bad  { color: var(--danger, #b4443a); }
+
+.btres-c-cause { white-space: nowrap; font-weight: 550; }
+.btres-c-cause.is-ok   { color: var(--ok, #3f8f5f); }
+.btres-c-cause.is-warn { color: var(--warn, #b8862b); }
+.btres-c-cause.is-bad  { color: var(--danger, #b4443a); }
+.btres-c-cause.is-skip { color: var(--text-dim); }
+
+.btres-err { margin: 10px 0 0; font-size: 12px; color: var(--danger, #b4443a); }
+
+.btr-more {
+  padding: 9px 18px; border-bottom: 1px solid var(--border);
+  font-size: 12px; color: var(--text-dim);
+}
+.btr-more a { color: var(--accent); text-decoration: none; }
+.btr-more a:hover { text-decoration: underline; }
+
+/* The run's name, typed before it starts. Sits with the Run button because it is part of the same
+   act, and disappears once the run is going — there is nothing left to name. */
+.btr-name {
+  height: 30px;
+  width: 210px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-2, transparent);
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+}
+.btr-name:focus { outline: none; border-color: var(--accent); }
+
+/* Raw envelopes are read as documents, not as prose: monospace, and capped so a 4 KB response
+   does not push the prompt above it off the top of the drawer. */
+.bm-prompt.is-raw {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  max-height: 320px;
+  overflow: auto;
+  white-space: pre;
+}
+
+/* The run's identity, asked for where the result will appear. Centred in the empty body rather
+   than pinned to a corner: before a run there is nothing else on this surface, and a small form
+   floating at the top-left of a wide empty panel reads as something left behind. */
+.btr-form {
+  width: min(520px, 100%);
+  /* auto margins, not a rule on the parent: the same pane holds the running list, which has to
+     fill it rather than sit in the middle. */
+  margin: auto;
+  padding: 34px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.btr-f { display: flex; flex-direction: column; gap: 7px; }
+
+.btr-f-k {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-dim);
+}
+
+.btr-f-k i {
+  font-style: normal;
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 400;
+  opacity: 0.7;
+  margin-left: 4px;
+}
+
+.btr-f-v {
+  width: 100%;
+  height: 40px;
+  padding: 0 13px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2, transparent);
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  transition: border-color var(--tr), box-shadow var(--tr);
+}
+
+.btr-f-v:hover { border-color: var(--text-dim); }
+
+.btr-f-v:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft, rgba(127, 127, 127, 0.15));
+}
+
+/* The placeholder is the value that will be used, so it must not read as absent. */
+.btr-f-v::placeholder { color: var(--text-dim); opacity: 0.9; }
+
+.btr-f-hint { font-size: 11.5px; color: var(--text-dim); }
+
+.btres-note { margin: 10px 0 0; font-size: 12px; color: var(--text-dim); }
+
+/* Outcome chips carry the same tone the table's cause column does, so the eye connects the two. */
+.bm-chip.is-ok   { color: var(--ok, #3f8f5f); }
+.bm-chip.is-warn { color: var(--warn, #b8862b); }
+.bm-chip.is-bad  { color: var(--danger, #b4443a); }
+.bm-chip.is-skip { color: var(--text-dim); }
+.bm-chip.is-ok.is-on, .bm-chip.is-warn.is-on, .bm-chip.is-bad.is-on { border-color: currentColor; }
+
+.btres-rates { display: flex; gap: 30px; margin-left: 26px; }
+
+/* Run names are the operator's own and can be long; truncating one to "benchmark · 08-2…" loses
+   exactly the part that tells two runs apart. Wrapped to two lines instead. */
+.bt-set-name {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.35;
+  display: block;
+}
+.bt-rail { flex-basis: 268px; }

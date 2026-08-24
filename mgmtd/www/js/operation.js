@@ -60,7 +60,7 @@
         <div class="cfg-toolbar">
           <div class="cfg-toolbar-meta">
             <span class="cfg-h">Operation</span>
-            <span class="cfg-h-sub">view, save, load, export &amp; import the running configuration</span>
+            <span class="cfg-h-sub">view, save, load, export &amp; import the running configuration and the benchtest sets</span>
           </div>
         </div>
 
@@ -89,13 +89,15 @@
           ${msg ? `<div class="op-msg ${msg.err ? 'err' : 'ok'}">${esc(msg.text)}</div>` : ''}
         </div>
 
-        <!-- techdoc.js owns this card. Mounted rather than inlined because the render above
-             replaces #contentBody wholesale, which would wipe anything it rendered itself. -->
+        <!-- techdoc.js and benchtest-card.js own these. Mounted rather than inlined because the
+             render above replaces #contentBody wholesale, which would wipe anything they drew. -->
         <div id="techdocMount"></div>
+        <div id="benchtestMount"></div>
       </div>`;
 
     wire();
     if (window.NMS.techdoc) window.NMS.techdoc.mount();
+    if (window.NMS.benchtestCard) window.NMS.benchtestCard.mount();
   }
 
   function setMsg(text, err) { msg = { text, err: !!err }; render(); }

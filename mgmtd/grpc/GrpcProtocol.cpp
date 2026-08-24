@@ -12,6 +12,18 @@ const char* grpcCmdToStr(GrpcCmd cmd) noexcept
     case GrpcCmd::CorpusRefresh: return "CorpusRefresh";
     case GrpcCmd::CorpusCancel:  return "CorpusCancel";
     case GrpcCmd::CorpusDocuments: return "CorpusDocuments";
+    case GrpcCmd::BenchtestDatasets: return "BenchtestDatasets";
+    case GrpcCmd::BenchtestUpload:   return "BenchtestUpload";
+    case GrpcCmd::BenchtestDelete:   return "BenchtestDelete";
+    case GrpcCmd::BenchtestSummary:  return "BenchtestSummary";
+    case GrpcCmd::BenchtestRows:     return "BenchtestRows";
+    case GrpcCmd::BenchtestExport:   return "BenchtestExport";
+    case GrpcCmd::BenchtestRun:      return "BenchtestRun";
+    case GrpcCmd::BenchtestRunList:  return "BenchtestRunList";
+    case GrpcCmd::BenchtestRunInfo:  return "BenchtestRunInfo";
+    case GrpcCmd::BenchtestCases:    return "BenchtestCases";
+    case GrpcCmd::BenchtestCase:     return "BenchtestCase";
+    case GrpcCmd::BenchtestCancel:   return "BenchtestCancel";
     case GrpcCmd::Unknown:       break;
     }
     return "Unknown";
@@ -19,7 +31,7 @@ const char* grpcCmdToStr(GrpcCmd cmd) noexcept
 
 bool grpcCmdStreams(GrpcCmd cmd) noexcept
 {
-    return cmd == GrpcCmd::CorpusRefresh;
+    return cmd == GrpcCmd::CorpusRefresh || cmd == GrpcCmd::BenchtestRun;
 }
 
 }

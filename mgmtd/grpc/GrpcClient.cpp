@@ -22,12 +22,22 @@ struct GrpcClient::Impl
     // cancelling thread and the streaming thread are different by definition.
     std::mutex refreshMutex;
     grpc::ClientContext* activeRefresh = nullptr;
+    grpc::ClientContext* activeRun = nullptr;
 };
 
 GrpcClient::GrpcClient(const std::string& target)
     : m_impl(std::make_unique<Impl>())
 {
-    m_impl->channel = grpc::CreateChannel(target, grpc::InsecureChannelCredentials());
+    // A benchtest upload carries a whole .jsonl in one message, which is past gRPC's 4 MB
+    // default. Raised on both directions to match what pretzel-ai's store accepts (32 MB) plus
+    // framing: without this the large-file case fails at the transport with RESOURCE_EXHAUSTED
+    // and never reaches the server's own size check, whose message actually says what to do.
+    constexpr int kMaxMessageBytes = 33 * 1024 * 1024;
+    grpc::ChannelArguments args;
+    args.SetMaxReceiveMessageSize(kMaxMessageBytes);
+    args.SetMaxSendMessageSize(kMaxMessageBytes);
+
+    m_impl->channel = grpc::CreateCustomChannel(target, grpc::InsecureChannelCredentials(), args);
     m_impl->stub = v1::PretzelAi::NewStub(m_impl->channel);
 }
 
@@ -135,6 +145,272 @@ std::string GrpcClient::corpusDocuments(const std::string& product, const std::s
     }
     if (!reply.error().empty())
         error = reply.error();
+    return toJson(reply);
+}
+
+// --- Benchtest sets -------------------------------------------------------------------------
+//
+// An upload carries a whole file in one message. The channel is created with a raised message
+// limit (see the constructor) because the default 4 MB sits below what the store accepts, and a
+// file over that would fail at the transport with a RESOURCE_EXHAUSTED that never reaches the
+// server's own size check and its clearer message.
+
+std::string GrpcClient::benchtestDatasets(const std::string& search, std::string& error)
+{
+    v1::ListBenchmarkDatasetsRequest request;
+    request.set_search(search);
+
+    grpc::ClientContext ctx;
+    v1::BenchmarkDatasetList reply;
+    const grpc::Status status = m_impl->stub->ListBenchmarkDatasets(&ctx, request, &reply);
+    if (!status.ok())
+    {
+        error = "gRPC transport error: " + status.error_message();
+        return {};
+    }
+    return toJson(reply);
+}
+
+std::string GrpcClient::benchtestSummary(std::int64_t datasetId, std::string& error)
+{
+    v1::BenchmarkSummaryRequest request;
+    request.set_dataset_id(datasetId);
+
+    grpc::ClientContext ctx;
+    v1::BenchmarkSummary reply;
+    const grpc::Status status = m_impl->stub->GetBenchmarkSummary(&ctx, request, &reply);
+    if (!status.ok())
+    {
+        error = "gRPC transport error: " + status.error_message();
+        return {};
+    }
+    return toJson(reply);
+}
+
+std::string GrpcClient::benchtestRows(std::int64_t datasetId, const std::string& category,
+                                      const std::string& verdict, const std::string& language,
+                                      const std::string& technique, const std::string& search,
+                                      std::int32_t offset, std::int32_t limit,
+                                      const std::string& orderBy, bool descending,
+                                      std::string& error)
+{
+    v1::ListBenchmarkRequest request;
+    request.set_dataset_id(datasetId);
+    request.set_category(category);
+    request.set_verdict(verdict);
+    request.set_language(language);
+    request.set_technique(technique);
+    request.set_search(search);
+    request.set_offset(offset);
+    request.set_limit(limit);
+    request.set_order_by(orderBy);
+    request.set_descending(descending);
+
+    grpc::ClientContext ctx;
+    v1::BenchmarkPage reply;
+    const grpc::Status status = m_impl->stub->ListBenchmark(&ctx, request, &reply);
+    if (!status.ok())
+    {
+        error = "gRPC transport error: " + status.error_message();
+        return {};
+    }
+    return toJson(reply);
+}
+
+std::string GrpcClient::benchtestUpload(const std::string& content, const std::string& filename,
+                                        const std::string& name, const std::string& note,
+                                        const std::string& uploadedBy, std::string& error)
+{
+    v1::UploadBenchmarkDatasetRequest request;
+    request.set_content(content);
+    request.set_filename(filename);
+    request.set_name(name);
+    request.set_note(note);
+    request.set_uploaded_by(uploadedBy);
+
+    grpc::ClientContext ctx;
+    v1::UploadBenchmarkDatasetResult reply;
+    const grpc::Status status = m_impl->stub->UploadBenchmarkDataset(&ctx, request, &reply);
+    if (!status.ok())
+    {
+        error = "gRPC transport error: " + status.error_message();
+        return {};
+    }
+    return toJson(reply);
+}
+
+std::string GrpcClient::benchtestDelete(std::int64_t datasetId, std::string& error)
+{
+    v1::DeleteBenchmarkDatasetRequest request;
+    request.set_dataset_id(datasetId);
+
+    grpc::ClientContext ctx;
+    v1::DeleteBenchmarkDatasetResult reply;
+    const grpc::Status status = m_impl->stub->DeleteBenchmarkDataset(&ctx, request, &reply);
+    if (!status.ok())
+    {
+        error = "gRPC transport error: " + status.error_message();
+        return {};
+    }
+    return toJson(reply);
+}
+
+GrpcClient::Export GrpcClient::benchtestExport(std::int64_t datasetId)
+{
+    v1::ExportBenchmarkDatasetRequest request;
+    request.set_dataset_id(datasetId);
+
+    grpc::ClientContext ctx;
+    v1::ExportBenchmarkDatasetResult reply;
+    const grpc::Status status = m_impl->stub->ExportBenchmarkDataset(&ctx, request, &reply);
+
+    Export out;
+    if (!status.ok())
+    {
+        out.error = "gRPC transport error: " + status.error_message();
+        return out;
+    }
+    out.error = reply.error();
+    out.content = reply.content();
+    out.filename = reply.filename();
+    return out;
+}
+
+void GrpcClient::benchtestRun(std::int64_t datasetId, const std::string& category,
+                              const std::string& verdict, const std::string& language,
+                              const std::string& technique, const std::string& search,
+                              std::int32_t workers, const std::string& label,
+                              const std::string& note,
+                              const std::function<void(const std::string&)>& on_progress,
+                              std::string& error)
+{
+    v1::RunBenchtestRequest request;
+    request.set_dataset_id(datasetId);
+    request.set_category(category);
+    request.set_verdict(verdict);
+    request.set_language(language);
+    request.set_technique(technique);
+    request.set_search(search);
+    request.set_workers(workers);
+    request.set_label(label);
+    request.set_note(note);
+
+    grpc::ClientContext ctx;
+    {
+        std::lock_guard<std::mutex> lock(m_impl->refreshMutex);
+        m_impl->activeRun = &ctx;
+    }
+
+    std::unique_ptr<grpc::ClientReader<v1::RunProgress>> reader(
+        m_impl->stub->RunBenchtest(&ctx, request));
+    v1::RunProgress progress;
+    while (reader->Read(&progress))
+        on_progress(toJson(progress));
+
+    const grpc::Status status = reader->Finish();
+    {
+        std::lock_guard<std::mutex> lock(m_impl->refreshMutex);
+        m_impl->activeRun = nullptr;
+    }
+    if (!status.ok() && status.error_code() != grpc::StatusCode::CANCELLED)
+        error = "gRPC transport error: " + status.error_message();
+}
+
+void GrpcClient::cancelBenchtestRun()
+{
+    std::lock_guard<std::mutex> lock(m_impl->refreshMutex);
+    if (m_impl->activeRun)
+        m_impl->activeRun->TryCancel();
+}
+
+std::string GrpcClient::benchtestRuns(std::int64_t datasetId, std::int32_t limit,
+                                      std::string& error)
+{
+    v1::ListBenchtestRunsRequest request;
+    request.set_dataset_id(datasetId);
+    request.set_limit(limit);
+
+    grpc::ClientContext ctx;
+    v1::BenchtestRunList reply;
+    const grpc::Status status = m_impl->stub->ListBenchtestRuns(&ctx, request, &reply);
+    if (!status.ok())
+    {
+        error = "gRPC transport error: " + status.error_message();
+        return {};
+    }
+    return toJson(reply);
+}
+
+std::string GrpcClient::benchtestRunInfo(std::int64_t runId, const std::string& category,
+                                         const std::string& verdict, const std::string& language,
+                                         const std::string& technique, const std::string& search,
+                                         std::string& error)
+{
+    v1::GetBenchtestRunRequest request;
+    request.set_run_id(runId);
+    request.set_category(category);
+    request.set_verdict(verdict);
+    request.set_language(language);
+    request.set_technique(technique);
+    request.set_search(search);
+
+    grpc::ClientContext ctx;
+    v1::BenchtestRunSummary reply;
+    const grpc::Status status = m_impl->stub->GetBenchtestRun(&ctx, request, &reply);
+    if (!status.ok())
+    {
+        error = "gRPC transport error: " + status.error_message();
+        return {};
+    }
+    return toJson(reply);
+}
+
+std::string GrpcClient::benchtestCases(std::int64_t runId, const std::string& cause,
+                                       const std::string& category, const std::string& verdict,
+                                       const std::string& language, const std::string& technique,
+                                       const std::string& search, const std::string& orderBy,
+                                       bool descending,
+                                       std::int32_t offset, std::int32_t limit,
+                                       std::string& error)
+{
+    v1::ListBenchtestCasesRequest request;
+    request.set_run_id(runId);
+    request.set_cause(cause);
+    request.set_category(category);
+    request.set_verdict(verdict);
+    request.set_language(language);
+    request.set_technique(technique);
+    request.set_search(search);
+    request.set_order_by(orderBy);
+    request.set_descending(descending);
+    request.set_offset(offset);
+    request.set_limit(limit);
+
+    grpc::ClientContext ctx;
+    v1::BenchtestCaseList reply;
+    const grpc::Status status = m_impl->stub->ListBenchtestCases(&ctx, request, &reply);
+    if (!status.ok())
+    {
+        error = "gRPC transport error: " + status.error_message();
+        return {};
+    }
+    return toJson(reply);
+}
+
+std::string GrpcClient::benchtestCase(std::int64_t runId, std::int32_t seq, std::string& error)
+{
+    v1::GetBenchtestCaseRequest request;
+    request.set_run_id(runId);
+    request.set_seq(seq);
+
+    grpc::ClientContext ctx;
+    v1::BenchtestCaseDetail reply;
+    const grpc::Status status = m_impl->stub->GetBenchtestCase(&ctx, request, &reply);
+    if (!status.ok())
+    {
+        error = "gRPC transport error: " + status.error_message();
+        return {};
+    }
     return toJson(reply);
 }
 
