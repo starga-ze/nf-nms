@@ -18,6 +18,11 @@ enum class GrpcCmd : std::uint16_t
 
     // ── The assistant ──
     Chat = 1,
+    // The picker's catalog. Unary and cheap, but it goes through the same ticket path every other
+    // call does rather than being answered inline: responses here are built on the loop the gRPC
+    // socket also lives on, so a controller that blocked on the stub would stall every other
+    // request for the length of the round trip.
+    ListModels = 19,
 
     // ── The tech-doc knowledge base ──
     CorpusStatus = 3,    // what the store holds now

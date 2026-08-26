@@ -33,6 +33,7 @@ enum class WebGrpcEventType : std::uint32_t
     // A run reports many times and is read by any number of polls, so it overwrites one live slot
     // rather than resolving a ticket — the same shape a corpus refresh has.
     BenchtestRunProgress = 7,   // one run message             → BenchtestController
+    ModelListResponse = 8,      // the picker's catalog        → ChatController
 };
 
 // Maps the call that was made to the answer it produces. Kept beside the enum so adding a call

@@ -15,6 +15,7 @@ WebGrpcEventType webGrpcEventFor(GrpcCmd cmd) noexcept
     switch (cmd)
     {
     case GrpcCmd::Chat:          return WebGrpcEventType::ChatResponse;
+    case GrpcCmd::ListModels:    return WebGrpcEventType::ModelListResponse;
     case GrpcCmd::CorpusStatus:  return WebGrpcEventType::CorpusStatusResponse;
     case GrpcCmd::CorpusDocuments: return WebGrpcEventType::CorpusDocumentList;
     case GrpcCmd::CorpusRefresh: return WebGrpcEventType::CorpusRefreshProgress;
@@ -83,6 +84,7 @@ void WebGrpcEvent::dispatch(MgmtdServiceManager& serviceManager)
     case WebGrpcEventType::CorpusStatusResponse:
     case WebGrpcEventType::CorpusDocumentList:
     case WebGrpcEventType::BenchtestResponse:
+    case WebGrpcEventType::ModelListResponse:
         serviceManager.setChatResult(m_ticket, std::move(m_json));
         return;
 

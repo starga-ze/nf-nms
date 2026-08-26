@@ -70,9 +70,6 @@ std::unique_ptr<MgmtdEvent> MgmtdEventFactory::create(std::unique_ptr<pz::ipc::I
     case pz::ipc::IpcCmd::ApiConnectorTestResponse:
         return std::make_unique<WebIpcEvent>(WebIpcEventType::ApiConnectorTestResponse, std::move(msg));
 
-    case pz::ipc::IpcCmd::GatewayCredentialStoreResponse:
-        return std::make_unique<WebIpcEvent>(WebIpcEventType::GatewayCredentialStoreResponse, std::move(msg));
-
     default:
         LOG_WARN("unhandled cmd (cmd={})", static_cast<int>(msg->getCmd()));
         return nullptr;

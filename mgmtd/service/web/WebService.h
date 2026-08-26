@@ -6,7 +6,6 @@
 #include "service/web/controller/BenchtestController.h"
 #include "service/web/controller/TechDocController.h"
 #include "service/web/controller/CollectionController.h"
-#include "service/web/controller/GatewayController.h"
 #include "service/web/controller/LogsController.h"
 #include "service/web/controller/SettingsController.h"
 #include "service/web/controller/SsoController.h"
@@ -78,13 +77,10 @@ enum class WebRoute
     CollectionSamples,    // GET  /api/collection/samples?connector=&endpoint=&status=&before=&limit=
     CollectionSample,     // GET  /api/collection/sample?oid=
 
-    // GatewayController — the AI gateway credential.
-    GatewayCredential, // POST /api/gateway/credential
-    GatewayStatus,     // GET  /api/gateway/status?id=
-
     // ChatController — the internal assistant.
     ChatSend,     // POST /api/chat
     ChatResult,   // GET  /api/chat/result?ticket=
+    ChatModels,   // GET  /api/chat/models
 
     // TechDocController — the tech-doc knowledge base behind the assistant.
     TechDocStatus,    // GET  /api/techdoc/status
@@ -188,7 +184,6 @@ private:
     StatusController m_statusController;
     TopologyController m_topologyController;
     ApiController m_apiController;
-    GatewayController m_gatewayController;
     ChatController m_chatController;
     TechDocController m_techDocController;
     BenchtestController m_benchtestController;

@@ -24,6 +24,15 @@ public:
 
     // GET /api/chat/result?ticket=<n> → {status:"pending"} until pretzel-ai answers, then the turn.
     void result(MgmtdServiceManager& sm, const pz::http::HttpRequest& req, pz::http::HttpResponse& resp);
+
+    // GET /api/chat/models → 202 {ticket, status:"pending"}; the answer is polled on
+    // /api/chat/result like a turn is.
+    //
+    // The catalog lives in pretzel-ai's own config and is asked for rather than mirrored here: the
+    // gateway account decides which models are reachable, so it is a fact about the daemon, not a
+    // declaration the operator commits. Held in running_config it would be diffed and rolled back
+    // like a policy, and rolling the configuration back does not put a model back in the account.
+    void models(MgmtdServiceManager& sm, const pz::http::HttpRequest& req, pz::http::HttpResponse& resp);
 };
 
 }

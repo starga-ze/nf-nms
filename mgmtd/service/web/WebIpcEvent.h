@@ -29,7 +29,9 @@ enum class WebIpcEventType : std::uint32_t
     ApiConnectorTestResponse = 3,// collectord ran a device call   → ApiController
     // 4, 5 (ChatResponse, RetrieveResponse) retired: chat moved to the pretzel-ai gRPC transport,
     // whose answers arrive inline via GrpcClientHandler, not as inbound IPC events.
-    GatewayCredentialStoreResponse = 6  // sealed+stored the gateway key → GatewayController
+    // 6 (GatewayCredentialStoreResponse) retired with the Configuration ▸ AI Gateway tab: the
+    // gateway credential is read from pretzel-ai's own config, so nothing seals a key through
+    // mgmtd any more. The number stays spent — inferd still speaks it on the wire.
 };
 
 class WebIpcEvent final : public MgmtdEvent

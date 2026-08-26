@@ -99,8 +99,6 @@
         { id: 'api-endpoint', label: 'API Endpoint' } ] },
     { id: 'api-connector', label: 'API Connector', tabs: [
         { id: 'api-connector', label: 'API Connector' } ] },
-    { id: 'ai-gateway', label: 'AI Gateway', tabs: [
-        { id: 'ai-gateway',   label: 'AI Gateway'   } ] },
     { id: 'system-management', label: 'System Management', tabs: [
         { id: 'user',         label: 'User'         },
         { id: 'operation',    label: 'Operation'    } ] },

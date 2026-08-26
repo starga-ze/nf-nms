@@ -138,19 +138,168 @@ body.page-chatbot .content-body {
 .chat-pill.is-err    { color: var(--ink-red); border-color: color-mix(in srgb, var(--red) 40%, var(--border)); background: var(--tint-red); }
 .chat-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
 
-.chat-select {
+/* ── Model picker ────────────────────────────────────────────────────────────
+   Its own control rather than the shared enhanceSelect dropdown. Three things that control cannot
+   say and this one has to: the catalog spans providers and switching model switches upstream
+   ACCOUNT, the routing id (@<integration>/<model>) is what a gateway refusal names so it has to be
+   readable, and ten entries is a list you scan rather than one you pick blind from.
+
+   Every colour is a token, so this reads correctly in both themes without a second palette. */
+.mp { position: relative; flex: 0 0 auto; }
+
+.mp-trigger {
+  display: inline-flex; align-items: center; gap: 8px;
+  min-width: 190px; max-width: 280px;
+  padding: 4px 8px 4px 9px;
   font-family: inherit; font-size: 11.5px; font-weight: 600; color: var(--text);
   background: var(--surface-2); border: 1px solid var(--border); border-radius: 7px;
-  padding: 4px 8px; max-width: 210px;
+  cursor: pointer; text-align: left;
+  transition: border-color var(--tr), background var(--tr);
 }
-/* The model picker goes through the shared custom dropdown (NMS.utils.enhanceSelect) so it looks
-   the same here as in Configuration — but that control is sized for a settings form, and in a
-   control strip it has to sit at the height of the pills beside it. */
-.chat-bar .cs { width: auto; flex: 0 0 auto; }
-.chat-bar .cs-trigger {
-  width: auto; min-width: 176px; gap: 7px; padding: 4px 9px; border-radius: 7px;
-  font-size: 11.5px; font-weight: 600; background: var(--surface-2);
+.mp-trigger:hover:not(:disabled) { border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); }
+.mp-trigger:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.mp-trigger:disabled { opacity: .55; cursor: default; }
+.mp.is-open .mp-trigger {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  background: var(--surface);
 }
+
+.mp-tl { display: inline-flex; align-items: baseline; gap: 7px; min-width: 0; flex: 1 1 auto; }
+.mp-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mp-prov {
+  font-size: 10px; font-weight: 600; color: var(--text-muted);
+  white-space: nowrap; flex: 0 0 auto;
+}
+
+.mp-caret { line-height: 0; color: var(--text-muted); flex: 0 0 auto; transition: transform var(--tr); }
+.mp-caret svg { width: 13px; height: 13px; stroke-width: 2.2; }
+.mp.is-open .mp-caret { transform: rotate(180deg); }
+
+/* The catalog could not be read and the list is the one-entry fallback. Loud enough to notice,
+   quiet enough not to look like a security finding — the page has real ones of those. */
+.mp-warn {
+  flex: 0 0 auto; width: 14px; height: 14px; border-radius: 50%;
+  display: inline-grid; place-items: center;
+  font-size: 10px; font-weight: 800; line-height: 1;
+  color: var(--ink-amber); background: var(--tint-orange);
+  border: 1px solid color-mix(in srgb, var(--orange) 45%, transparent);
+}
+
+/* Above the rail (30) and the inspector (31): the picker is opened from the strip that sits over
+   both, and a panel clipped by either would be unusable on a narrow viewport. */
+.mp-panel {
+  position: absolute; top: calc(100% + 6px); left: 0; z-index: 40;
+  width: 316px; max-width: min(316px, calc(100vw - 32px));
+  display: flex; flex-direction: column; max-height: 384px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 10px; box-shadow: var(--shadow); overflow: hidden;
+  animation: mp-in .13s cubic-bezier(.4, 0, .2, 1);
+}
+@keyframes mp-in { from { opacity: 0; transform: translateY(-4px); } }
+
+.mp-search {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 7px;
+  padding: 8px 10px; border-bottom: 1px solid var(--border); background: var(--surface-2);
+}
+.mp-search svg { width: 13px; height: 13px; stroke-width: 2; color: var(--text-muted); flex: 0 0 auto; }
+.mp-search input {
+  flex: 1 1 auto; min-width: 0; border: 0; background: transparent; outline: none;
+  font-family: inherit; font-size: 12px; color: var(--text);
+}
+.mp-search input::placeholder { color: var(--text-muted); }
+
+.mp-list {
+  flex: 1 1 auto; overflow-y: auto; padding: 4px 0;
+  scrollbar-width: thin; scrollbar-color: var(--border) transparent;
+}
+
+.mp-group {
+  position: sticky; top: 0; z-index: 1;
+  display: flex; align-items: center; gap: 7px;
+  padding: 7px 12px 5px;
+  font-size: 9.5px; font-weight: 800; letter-spacing: .07em; text-transform: uppercase;
+  color: var(--text-muted); background: var(--surface);
+}
+.mp-count {
+  margin-left: auto; font-size: 9.5px; font-weight: 700; letter-spacing: 0;
+  color: var(--text-muted); background: var(--surface-2);
+  border: 1px solid var(--border); border-radius: 999px; padding: 0 5px;
+}
+
+.mp-opt {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 12px; cursor: pointer;
+  border-left: 2px solid transparent;
+}
+.mp-opt:hover, .mp-opt.is-active { background: var(--surface-hover); }
+.mp-opt.is-active { border-left-color: var(--accent); }
+.mp-opt.is-on .mp-opt-name { color: var(--accent); }
+
+.mp-opt-t { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1 1 auto; }
+.mp-opt-name {
+  font-size: 12px; font-weight: 600; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* Monospace and dimmed: this is the string the gateway routes on, so it is here to be READ
+   character by character when a refusal names it — not to compete with the label. */
+.mp-opt-id {
+  font-family: var(--font-mono); font-size: 9.5px; color: var(--text-muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.mp-check { line-height: 0; color: var(--accent); flex: 0 0 auto; }
+.mp-check svg { width: 13px; height: 13px; stroke-width: 2.6; }
+
+.mp-empty { padding: 18px 12px; text-align: center; font-size: 11.5px; color: var(--text-muted); }
+
+/* The footer is swapped independently of the rows, so it lives in a slot. `display: contents`
+   keeps .mp-foot a direct flex child of the panel — a wrapper that participated in the layout
+   would push the list's height calculation off by its own box. */
+.mp-foot-slot { display: contents; }
+
+.mp-foot {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 8px;
+  padding: 7px 10px 7px 12px; border-top: 1px solid var(--border);
+  background: var(--surface-2); font-size: 10px; color: var(--text-muted);
+}
+.mp-foot > span { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.mp-foot.is-err { color: var(--ink-amber); background: var(--tint-orange); }
+/* The failure text can be a sentence from the daemon, so it wraps rather than being cut to a
+   width that would hide which half of the path failed. */
+.mp-foot.is-err > span { white-space: normal; overflow: visible; line-height: 1.4; }
+.mp-retry {
+  flex: 0 0 auto; font-family: inherit; font-size: 10px; font-weight: 700; color: var(--text);
+  background: var(--surface); border: 1px solid var(--border); border-radius: 5px;
+  padding: 2px 7px; cursor: pointer; transition: border-color var(--tr);
+}
+.mp-retry:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
+
+/* Loading. Three bars rather than a spinner: the panel is about to be a list, and a shape that
+   already looks like one does not make the content jump when it arrives. */
+.mp-skel {
+  height: 30px; margin: 6px 10px; border-radius: 6px;
+  background: linear-gradient(90deg, var(--surface-2) 25%, var(--surface-hover) 37%, var(--surface-2) 63%);
+  background-size: 400% 100%;
+  animation: mp-shimmer 1.3s ease-in-out infinite;
+}
+@keyframes mp-shimmer { from { background-position: 100% 0; } to { background-position: 0 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .mp-panel { animation: none; }
+  .mp-skel  { animation: none; }
+}
+
+/* Provider identity. One dot, used in the trigger and in the group header, so the eye can find
+   "the Anthropic ones" without reading. An unlisted provider still gets a dot — a blank slot
+   would read as a rendering fault rather than as a provider nobody has coloured yet. */
+.mp-dot {
+  width: 7px; height: 7px; border-radius: 50%; flex: 0 0 auto;
+  background: var(--text-muted);
+}
+.mp-dot[data-p="openai"]    { background: var(--green); }
+.mp-dot[data-p="anthropic"] { background: var(--accent); }
+.mp-dot[data-p="google"]    { background: var(--blue); }
+.mp-dot[data-p="vertex-ai"] { background: var(--blue); }
+.mp-dot[data-p="azure-openai"] { background: var(--blue); }
+.mp-dot[data-p="bedrock"]   { background: var(--orange); }
 
 /* ── Thread ─────────────────────────────────────────────────────────────────── */
 .chat-thread {

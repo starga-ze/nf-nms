@@ -11,6 +11,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include <openssl/rand.h>
+
 #include <cstdlib>
 #include <string>
 #include <utility>
@@ -36,6 +38,36 @@ constexpr std::size_t kMaxMessageChars = 32 * 1024;
 // are dropped rather than newest — recent context is what a follow-up question depends on.
 constexpr std::size_t kMaxHistoryTurns = 20;
 constexpr std::size_t kMaxHistoryChars = 64 * 1024;
+
+// One operator request, named so it can be followed across everything pretzel-ai does to satisfy
+// it. Minted here rather than on the pretzel-ai side because "a request" is a fact about what a
+// person asked, and only this end knows where that began: with tool calls, one request becomes
+// several model calls, and pretzel-ai issues its own per-call id underneath this one.
+//
+// Random rather than a counter. The chat ticket is a counter and restarts with the process, which
+// is fine for a value only mgmtd dereferences, and wrong for one that leaves the appliance and
+// lands in someone else's scan logs beside other tenants' traffic.
+std::string newTransactionId()
+{
+    unsigned char buf[16];
+    if (RAND_bytes(buf, static_cast<int>(sizeof(buf))) != 1)
+    {
+        // Not fatal. The id is a tracing aid; a turn that cannot be traced is still a turn the
+        // operator asked for, and refusing it would trade a real answer for a log field.
+        LOG_WARN("transaction id generation failed — the turn proceeds without one");
+        return {};
+    }
+
+    static const char* hex = "0123456789abcdef";
+    std::string out = "txn_";
+    out.reserve(4 + sizeof(buf) * 2);
+    for (unsigned char c : buf)
+    {
+        out.push_back(hex[(c >> 4) & 0xF]);
+        out.push_back(hex[c & 0xF]);
+    }
+    return out;
+}
 
 // The browser sends the thread it is showing. It is not trusted to send it well: a role outside
 // user/assistant is dropped rather than forwarded, because a mislabelled turn replayed as the
@@ -81,6 +113,13 @@ std::vector<GrpcMessage::Turn> parseHistory(const json& input)
 
 }
 
+void ChatController::models(MgmtdServiceManager& sm, const pz::http::HttpRequest&, pz::http::HttpResponse& resp)
+{
+    const std::uint32_t ticket = sm.nextChatTicket();
+    sm.txRouter().handleGrpcMessage(GrpcMessage::models(ticket));
+    fill(resp, 202, json{{"ticket", ticket}, {"status", "pending"}}.dump());
+}
+
 void ChatController::send(MgmtdServiceManager& sm, const pz::http::HttpRequest& req, pz::http::HttpResponse& resp)
 {
     json input;
@@ -105,6 +144,7 @@ void ChatController::send(MgmtdServiceManager& sm, const pz::http::HttpRequest& 
     auto history = parseHistory(input);
 
     const std::uint32_t ticket = sm.nextChatTicket();
+    const std::string transactionId = newTransactionId();
 
     // Delegated through the router, same as the old IPC path — the controller does not know or
     // care that the transport underneath is now gRPC to the pretzel-ai service. The turn is
@@ -113,14 +153,19 @@ void ChatController::send(MgmtdServiceManager& sm, const pz::http::HttpRequest& 
     // its configured default.
     const std::size_t historyTurns = history.size();
     sm.txRouter().handleGrpcMessage(
-        GrpcMessage::chat(ticket, model, message, std::string(), std::move(history), sessionId));
+        GrpcMessage::chat(ticket, model, message, std::string(), std::move(history), sessionId,
+                          transactionId));
 
     // The message itself is not logged. It is whatever an employee typed, and this log is read by
     // people who have no business reading that; the ticket is enough to follow a turn through.
     // The history is not logged either, and for the same reason — only how much of it there was.
-    LOG_INFO("chat turn delegated to pretzel-ai (ticket={}, model={}, chars={}, history={}, session={})",
+    // The transaction id IS logged, unlike the message and the history: it carries no content,
+    // and it is the only way to line this log up with a scan report someone is asking about.
+    LOG_INFO("chat turn delegated to pretzel-ai (ticket={}, model={}, chars={}, history={}, "
+             "session={}, txn={})",
              ticket, model.empty() ? "default" : model, message.size(), historyTurns,
-             sessionId.empty() ? "none" : sessionId);
+             sessionId.empty() ? "none" : sessionId,
+             transactionId.empty() ? "none" : transactionId);
 
     fill(resp, 202, json{{"ticket", ticket}, {"status", "pending"}}.dump());
 }

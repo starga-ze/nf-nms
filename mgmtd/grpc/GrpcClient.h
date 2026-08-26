@@ -50,7 +50,13 @@ public:
                  const std::string& systemPrompt,
                  const std::vector<GrpcMessage::Turn>& history,
                  const std::string& sessionId,
+                 const std::string& transactionId,
                  const std::function<void(const std::string&)>& on_delta);
+
+    // The models this appliance may ask for, as {models:[{id,label,provider}], default_model}.
+    // Served straight through like the corpus calls: mgmtd has no opinion about the catalog, so a
+    // field pretzel-ai adds reaches the picker without a change here.
+    std::string listModels(std::string& error);
 
     // --- The tech-doc knowledge base ---------------------------------------------------------
     //

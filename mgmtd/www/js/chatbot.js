@@ -75,17 +75,27 @@
   const FRAME_MS = 16;
 
   // Model choice belongs to the gateway, not to the app — the app names a model and the gateway
-  // decides which provider and key serve it. Listed here so the demo can show that the same
-  // conversation is portable across providers while the scan profile stays put.
-  // Must mirror pretzel-ai's `models` allowlist (prisma-airs/config.json): the daemon rejects
-  // anything outside it, so offering a model here that the gateway will refuse is a picker that
-  // produces errors on purpose. Each entry is one gateway integration — switching model switches
-  // upstream account. The id is Portkey's own routing syntax, @<integration-slug>/<model>; a bare
-  // model name is refused by the gateway itself ("x-portkey-config or x-portkey-provider header is
-  // required"), so the slug is not decoration.
-  const MODELS = [
+  // decides which provider and key serve it. Each entry is one gateway integration, so switching
+  // model switches upstream account. The id is Portkey's own routing syntax,
+  // @<integration-slug>/<model>; a bare model name is refused by the gateway itself
+  // ("x-portkey-config or x-portkey-provider header is required"), so the slug is not decoration.
+  //
+  // The catalog is ASKED FOR, not declared here: GET /api/chat/models → pretzel-ai's ListModels,
+  // which answers out of prisma-airs/config.json. That file is the daemon's allowlist, so a list
+  // kept here too could disagree with it, and the disagreement only shows up as a refusal after
+  // the operator has already typed a message.
+  //
+  // FALLBACK_MODELS is for the one case where asking fails. An empty picker cannot be told apart
+  // from a broken page and cannot send anything either way, so one known-good model is offered and
+  // the strip says plainly that the list is stale.
+  const FALLBACK_MODELS = [
     { id: '@openai/gpt-4o-2024-11-20', label: 'GPT-4o', provider: 'OpenAI' },
   ];
+
+  let MODELS = FALLBACK_MODELS.slice();
+
+  // 'loading' until the daemon answers, then 'ready', or 'fallback' when it did not.
+  let catalog = { status: 'loading', error: '' };
 
   // ── Scan profile ───────────────────────────────────────────────────────────
   // The categories the profile checks. All of them are listed in the inspector on every scan,
@@ -355,7 +365,7 @@
   const state = {
     convos: [],        // [{ id, title, createdAt, updatedAt, messages: [] }]
     activeId: '',
-    model: MODELS[0].id,
+    model: FALLBACK_MODELS[0].id,
     railOpen: true,
     inspectId: '',     // message id whose scan is open
     sending: false,
@@ -373,7 +383,10 @@
       if (raw.activeId) state.activeId = raw.activeId;
       if (typeof raw.rag === 'boolean') state.rag = raw.rag;
       if (Number.isFinite(raw.topK)) state.topK = Math.min(20, Math.max(1, raw.topK));
-      if (raw.model && MODELS.some(m => m.id === raw.model)) state.model = raw.model;
+      // Not validated here: the catalog has not arrived yet, and dropping a stored choice
+      // against the one-entry fallback would reset every operator to GPT-4o on load.
+      // loadCatalog() checks it once the real list is in.
+      if (raw.model) state.model = raw.model;
       if (typeof raw.badges === 'boolean') state.badges = raw.badges;
       if (typeof raw.railOpen === 'boolean') state.railOpen = raw.railOpen;
     } catch (_) { /* corrupt or absent — start clean */ }
@@ -502,6 +515,8 @@
     copy:    svg('<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>'),
     shieldOff: svg('<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><line x1="4" y1="4" x2="20" y2="20"/>'),
     alert:   svg('<path d="M12 3l9.5 16.5H2.5z"/><line x1="12" y1="10" x2="12" y2="14"/><line x1="12" y1="17" x2="12.01" y2="17"/>'),
+    caret:   svg('<polyline points="6 9 12 15 18 9"/>'),
+    search:  svg('<circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>'),
   };
 
   // ── Minimal markdown ───────────────────────────────────────────────────────
@@ -648,6 +663,316 @@
     return out.join('').replace(/\uE000CODE(\d+)\uE001/g, (_, n) => blocks[Number(n)]);
   }
 
+  // ── The model catalog ──────────────────────────────────────────────────────
+  //
+  // Two hops, because that is how every pretzel-ai call reaches the browser: the POST/GET returns
+  // a ticket and the answer is polled off /api/chat/result. mgmtd builds responses on the same
+  // loop the gRPC socket lives on, so a route that blocked on the round trip would stall every
+  // other request for its duration.
+
+  const MODELS_URL = '/api/chat/models';
+  const CATALOG_POLL_MS = 180;
+  const CATALOG_TRIES = 45;   // ~8s, after which the list is not coming
+
+  // `wait` is the one declared with the send path below — the same helper, so it is shared rather
+  // than redeclared. A second `const wait` in this scope is not a shadow, it is a SyntaxError that
+  // takes the whole file down before a single line runs.
+
+  async function fetchCatalog() {
+    const r = await fetch(MODELS_URL, { credentials: 'same-origin' });
+    if (r.status === 404) throw new Error('this appliance has no /api/chat/models route');
+    if (!r.ok) throw new Error(`the model list could not be requested (HTTP ${r.status})`);
+
+    const ticket = (await r.json()).ticket;
+    if (!ticket) throw new Error('mgmtd issued no ticket for the model list');
+
+    for (let i = 0; i < CATALOG_TRIES; i++) {
+      await wait(CATALOG_POLL_MS);
+      const p = await fetch(`${CHAT_RESULT_URL}?ticket=${encodeURIComponent(ticket)}`,
+                            { credentials: 'same-origin' });
+      if (!p.ok) throw new Error(`the model list could not be read (HTTP ${p.status})`);
+      const doc = await p.json();
+      if (doc.status === 'pending') continue;
+      if (doc.error) throw new Error(doc.error);
+      return doc;
+    }
+    throw new Error('pretzel-ai did not answer with a model list');
+  }
+
+  async function loadCatalog() {
+    catalog = { status: 'loading', error: '' };
+    renderPicker();
+    try {
+      const doc = await fetchCatalog();
+      const list = (doc.models || []).filter(m => m && m.id).map(m => ({
+        id: m.id,
+        label: m.label || m.id,
+        provider: m.provider || '',
+      }));
+      if (!list.length) throw new Error('the appliance reports no models');
+
+      MODELS = list;
+      catalog = { status: 'ready', error: '' };
+
+      // A stored choice that has since left the catalog must not stay selected: the daemon would
+      // refuse it, and the refusal arrives only after the operator has typed and sent. The
+      // server's own default is preferred over "the first one" so the picker starts where the
+      // appliance says it should.
+      if (!MODELS.some(m => m.id === state.model)) {
+        const fallback = MODELS.some(m => m.id === doc.default_model)
+          ? doc.default_model : MODELS[0].id;
+        state.model = fallback;
+        save();
+      }
+    } catch (e) {
+      catalog = { status: 'fallback', error: String((e && e.message) || e) };
+    }
+    renderPicker();
+  }
+
+  // ── Model picker ───────────────────────────────────────────────────────────
+  //
+  // Deliberately not the shared enhanceSelect dropdown. That control is one flat list of strings,
+  // which is right for a settings field and wrong here on three counts: the catalog spans several
+  // providers and switching model switches upstream ACCOUNT, the exact routing id is what a
+  // gateway refusal will name so the operator has to be able to read it, and a flat list of ten
+  // entries is a list you scan rather than one you pick from.
+
+  const providerKey = (p) => (p || 'other').toLowerCase().replace(/[^a-z0-9]+/g, '-');
+
+  // Search appears once the list outgrows a glance. Below that it is chrome that costs a
+  // keystroke and saves none.
+  const SEARCH_AT = 7;
+
+  const picker = { open: false, query: '', active: -1, rows: [] };
+
+  function groupModels(list) {
+    const order = [], by = new Map();
+    list.forEach(m => {
+      const p = m.provider || 'Other';
+      if (!by.has(p)) { by.set(p, []); order.push(p); }
+      by.get(p).push(m);
+    });
+    return order.map(p => ({ provider: p, models: by.get(p) }));
+  }
+
+  function matchingModels() {
+    const q = picker.query.trim().toLowerCase();
+    if (!q) return MODELS;
+    return MODELS.filter(m => (m.label + ' ' + m.id + ' ' + (m.provider || '')).toLowerCase()
+                              .includes(q));
+  }
+
+  function currentModel() {
+    return MODELS.find(m => m.id === state.model) || MODELS[0] || FALLBACK_MODELS[0];
+  }
+
+  function pickerTrigger() {
+    const cur = currentModel();
+    const loading = catalog.status === 'loading';
+    return `
+      <button class="mp-trigger" type="button" id="mpTrigger"
+              aria-haspopup="listbox" aria-expanded="${picker.open ? 'true' : 'false'}"
+              ${state.sending ? 'disabled' : ''}>
+        <span class="mp-dot" data-p="${providerKey(cur.provider)}" aria-hidden="true"></span>
+        <span class="mp-tl">
+          <span class="mp-name">${esc(cur.label)}</span>
+          <span class="mp-prov">${loading ? '불러오는 중…' : esc(cur.provider || '—')}</span>
+        </span>
+        ${catalog.status === 'fallback'
+          ? '<span class="mp-warn" title="모델 목록을 가져오지 못했습니다">!</span>' : ''}
+        <span class="mp-caret" aria-hidden="true">${IC.caret}</span>
+      </button>`;
+  }
+
+  function pickerPanel() {
+    if (!picker.open) return '';
+
+    if (catalog.status === 'loading') {
+      return `<div class="mp-panel" role="listbox" aria-busy="true">
+                <div class="mp-skel"></div><div class="mp-skel"></div><div class="mp-skel"></div>
+              </div>`;
+    }
+
+    picker.rows = matchingModels();
+
+    const search = MODELS.length >= SEARCH_AT ? `
+      <div class="mp-search">
+        ${IC.search}
+        <input type="text" id="mpSearch" autocomplete="off" spellcheck="false"
+               placeholder="모델 검색" value="${esc(picker.query)}"
+               aria-label="모델 검색" aria-controls="mpList"/>
+      </div>` : '';
+
+    return `<div class="mp-panel" role="listbox" id="mpList">
+              ${search}<div class="mp-list" id="mpOpts">${optionsHtml()}</div>
+              <div class="mp-foot-slot">${footHtml()}</div>
+            </div>`;
+  }
+
+  function optionsHtml() {
+    const list = picker.rows;
+    return list.length ? groupModels(list).map(g => `
+      <div class="mp-group" role="presentation">
+        <span class="mp-dot" data-p="${providerKey(g.provider)}" aria-hidden="true"></span>
+        ${esc(g.provider)}
+        <span class="mp-count">${g.models.length}</span>
+      </div>
+      ${g.models.map(m => {
+        const i = list.indexOf(m);
+        const on = m.id === state.model;
+        return `
+        <div class="mp-opt${on ? ' is-on' : ''}${i === picker.active ? ' is-active' : ''}"
+             id="mpOpt${i}" role="option" aria-selected="${on}" data-id="${esc(m.id)}" data-i="${i}">
+          <span class="mp-opt-t">
+            <span class="mp-opt-name">${esc(m.label)}</span>
+            <span class="mp-opt-id">${esc(m.id)}</span>
+          </span>
+          ${on ? `<span class="mp-check" aria-hidden="true">${IC.check}</span>` : ''}
+        </div>`;
+      }).join('')}`).join('')
+      : `<div class="mp-empty">“${esc(picker.query)}”에 해당하는 모델이 없습니다.</div>`;
+  }
+
+  // The failure line is inside the panel, not a toast: it is the reason the list is one entry
+  // long, and it has to be readable at the moment the operator is wondering why.
+  function footHtml() {
+    return catalog.status === 'fallback'
+      ? `<div class="mp-foot is-err">
+           <span>${esc(catalog.error)}</span>
+           <button type="button" class="mp-retry" id="mpRetry">다시 시도</button>
+         </div>`
+      : `<div class="mp-foot">
+           <span>${MODELS.length}개 · pretzel-ai 카탈로그</span>
+           <button type="button" class="mp-retry" id="mpRetry">새로고침</button>
+         </div>`;
+  }
+
+  // Repaint the rows only. Typing and arrowing both come through here rather than through a full
+  // render, because replacing the panel would take the search input with it — and an input that is
+  // rebuilt on every keystroke loses the caret and, with a Korean IME, drops the syllable being
+  // composed. Keeping the input alive is the whole reason this is split in two.
+  function renderOptions() {
+    const list = document.getElementById('mpOpts');
+    if (!list) return;
+    list.innerHTML = optionsHtml();
+
+    const panel = document.getElementById('mpList');
+    if (panel) {
+      panel.setAttribute('aria-activedescendant',
+                         picker.active >= 0 ? 'mpOpt' + picker.active : '');
+    }
+    const slot = document.querySelector('.mp-foot-slot');
+    if (slot) slot.innerHTML = footHtml();
+
+    const active = list.querySelector('.mp-opt.is-active');
+    if (active) active.scrollIntoView({ block: 'nearest' });
+  }
+
+  function renderPicker() {
+    const el = document.getElementById('modelPicker');
+    if (!el) return;
+    el.className = 'mp' + (picker.open ? ' is-open' : '');
+    el.innerHTML = pickerTrigger() + pickerPanel();
+    if (!picker.open) return;
+
+    // The render replaced the focused element. Focus has to be put back inside the picker or the
+    // keydown handler below stops seeing arrow keys — the panel would open once and then go deaf.
+    const input = document.getElementById('mpSearch');
+    if (input) {
+      input.focus();
+      input.setSelectionRange(input.value.length, input.value.length);
+    } else {
+      const t = document.getElementById('mpTrigger');
+      if (t) t.focus();
+    }
+
+    const active = el.querySelector('.mp-opt.is-active');
+    if (active) active.scrollIntoView({ block: 'nearest' });
+  }
+
+  function openPicker() {
+    if (state.sending) return;
+    picker.open = true;
+    picker.query = '';
+    picker.rows = matchingModels();
+    picker.active = Math.max(0, picker.rows.findIndex(m => m.id === state.model));
+    renderPicker();
+  }
+
+  function closePicker(refocus) {
+    if (!picker.open) return;
+    picker.open = false;
+    picker.query = '';
+    picker.active = -1;
+    renderPicker();
+    if (refocus) { const t = document.getElementById('mpTrigger'); if (t) t.focus(); }
+  }
+
+  function choose(id) {
+    if (!id || !MODELS.some(m => m.id === id)) return;
+    state.model = id;
+    save();
+    closePicker(true);
+  }
+
+  function movePicker(delta) {
+    const n = picker.rows.length;
+    if (!n) return;
+    picker.active = (picker.active + delta + n) % n;
+    renderOptions();
+  }
+
+  function wirePicker() {
+    const el = document.getElementById('modelPicker');
+    if (!el) return;
+
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('#mpTrigger')) return picker.open ? closePicker(true) : openPicker();
+      if (e.target.closest('#mpRetry')) { closePicker(false); return loadCatalog(); }
+      const opt = e.target.closest('.mp-opt');
+      if (opt) choose(opt.dataset.id);
+    });
+
+    el.addEventListener('input', (e) => {
+      if (e.target.id !== 'mpSearch') return;
+      picker.query = e.target.value;
+      picker.rows = matchingModels();
+      // Filtering moves the highlight to the top rather than leaving it on a row that scrolled
+      // out of the result set — Enter must never commit something the operator cannot see.
+      picker.active = picker.rows.length ? 0 : -1;
+      renderOptions();
+    });
+
+    el.addEventListener('keydown', (e) => {
+      if (!picker.open) {
+        if (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ') {
+          if (e.target.closest('#mpTrigger')) { e.preventDefault(); openPicker(); }
+        }
+        return;
+      }
+      switch (e.key) {
+        case 'Escape':    e.preventDefault(); closePicker(true); break;
+        case 'ArrowDown': e.preventDefault(); movePicker(1); break;
+        case 'ArrowUp':   e.preventDefault(); movePicker(-1); break;
+        case 'Home':      e.preventDefault(); picker.active = 0; renderOptions(); break;
+        case 'End':       e.preventDefault(); picker.active = picker.rows.length - 1; renderOptions(); break;
+        case 'Tab':       closePicker(false); break;
+        case 'Enter':
+          e.preventDefault();
+          if (picker.rows[picker.active]) choose(picker.rows[picker.active].id);
+          break;
+        default: break;
+      }
+    });
+
+    // Clicking anywhere else closes it. Registered once on the document rather than per render,
+    // and it does not steal focus back — the operator clicked somewhere for a reason.
+    document.addEventListener('pointerdown', (e) => {
+      if (picker.open && !e.target.closest('#modelPicker')) closePicker(false);
+    });
+  }
+
   // ── Shell ──────────────────────────────────────────────────────────────────
 
   function mount() {
@@ -663,9 +988,9 @@
         </div>
         <div class="chat-main">
           <div class="chat-bar">
-            <select class="chat-select" id="chatModel">
-              ${MODELS.map(m => `<option value="${m.id}"${m.id === state.model ? ' selected' : ''}>${esc(m.label)} · ${esc(m.provider)}</option>`).join('')}
-            </select>
+            <!-- Filled by renderPicker() once the catalog is in; see the model-picker section
+                 for why this is not the shared enhanceSelect control. -->
+            <div class="mp" id="modelPicker"></div>
           </div>
 
           <div class="chat-thread" id="chatThread"><div class="chat-col" id="chatCol"></div></div>
@@ -690,10 +1015,14 @@
         </div>
       </div>`;
 
-    window.NMS.utils.enhanceSelect(document.getElementById('chatModel'));
     wire();
+    wirePicker();
+    renderPicker();
     renderRail();
     renderThread();
+    // Fired and not awaited: the page is usable while the catalog is in flight, and the picker
+    // shows its own loading state rather than the shell holding a blank strip until it lands.
+    loadCatalog();
   }
 
   // ── Rail ───────────────────────────────────────────────────────────────────
@@ -1344,6 +1673,7 @@
     if (!text || state.sending) return;
 
     state.sending = true;
+    renderPicker();
     setSendEnabled();
 
     let c = activeConvo();
@@ -1570,6 +1900,7 @@
     // Newest thread first, matching every other message list an operator has used.
     state.convos.sort((a, b) => b.updatedAt - a.updatedAt);
     state.sending = false;
+    renderPicker();
     save();
     renderRail();
     renderThread();
@@ -1710,7 +2041,7 @@
       input.value = '';
       autoGrow(input);
       setSendEnabled();
-      send(v).catch(() => { state.sending = false; setSendEnabled(); });
+      send(v).catch(() => { state.sending = false; renderPicker(); setSendEnabled(); });
     };
 
     input.addEventListener('input', () => { autoGrow(input); setSendEnabled(); });
@@ -1718,11 +2049,6 @@
       if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); submit(); }
     });
     sendBtn.addEventListener('click', submit);
-
-    document.getElementById('chatModel').addEventListener('change', (e) => {
-      state.model = e.target.value;
-      save();
-    });
 
     document.getElementById('chatCol').addEventListener('click', (e) => {
       const sug = e.target.closest('[data-sug]');
@@ -1781,6 +2107,7 @@
       load();
       renderRail();
       renderThread();
+      loadCatalog();
     });
   }
 

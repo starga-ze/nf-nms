@@ -51,9 +51,14 @@ struct GrpcMessage
     // thread reads as one session there instead of one session per turn.
     std::string sessionId;
 
+    // Chat: one operator request, minted here when the turn arrives. It outlives the individual
+    // model calls pretzel-ai makes to satisfy it — with tool calls that is several — which is why
+    // it is separate from the per-call id pretzel-ai issues on its own side.
+    std::string transactionId;
+
     static GrpcMessage chat(std::uint32_t ticket, std::string model, std::string message,
                            std::string systemPrompt, std::vector<Turn> history = {},
-                           std::string sessionId = {})
+                           std::string sessionId = {}, std::string transactionId = {})
     {
         GrpcMessage out;
         out.cmd = GrpcCmd::Chat;
@@ -63,6 +68,7 @@ struct GrpcMessage
         out.systemPrompt = std::move(systemPrompt);
         out.history = std::move(history);
         out.sessionId = std::move(sessionId);
+        out.transactionId = std::move(transactionId);
         return out;
     }
 
@@ -177,6 +183,15 @@ struct GrpcMessage
         out.limit = limit;
         out.orderBy = std::move(orderBy);
         out.descending = descending;
+        return out;
+    }
+
+    // ListModels — the whole input is the ticket, so there is nothing to carry but the cmd.
+    static GrpcMessage models(std::uint32_t ticket)
+    {
+        GrpcMessage out;
+        out.cmd = GrpcCmd::ListModels;
+        out.ticket = ticket;
         return out;
     }
 

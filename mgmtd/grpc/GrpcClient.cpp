@@ -5,8 +5,11 @@
 
 #include "pretzel_ai.grpc.pb.h"
 
+#include "util/Logger.h"
+
 #include <chrono>
 #include <mutex>
+#include <string>
 
 namespace pz::mgmtd
 {
@@ -43,11 +46,51 @@ GrpcClient::GrpcClient(const std::string& target)
 
 GrpcClient::~GrpcClient() = default;
 
+namespace
+{
+// The ChatRequest exactly as it goes on the wire, for lining this end up with what pretzel-ai
+// logs on receipt. Every field appears, including the empty ones — an absent line and an empty
+// value are different facts, and the whole reason to read this dump is to find out which one you
+// have.
+//
+// DEBUG on purpose, and it must stay there: `message` and `history` are whatever a person typed,
+// and the INFO log deliberately reports only their sizes. Turning this on is a decision to read
+// employee text, so it should take a decision.
+std::string dumpChatRequest(const v1::ChatRequest& r)
+{
+    // Values are capped; fields are not. A 32 KiB turn would otherwise bury the surrounding log,
+    // and the cut is marked so nobody reads a truncated value as the whole of it.
+    constexpr std::size_t kCap = 2048;
+    auto val = [](const std::string& v)
+    {
+        if (v.empty())
+            return std::string("\"\" (empty)");
+        // Bytes, and labelled as such: std::string::size() counts them, and pretzel-ai's dump
+        // sizes the same way so the two blocks line up on a Korean turn as well as an ASCII one.
+        std::string out = "(" + std::to_string(v.size()) + " bytes) \"";
+        out += v.size() > kCap ? v.substr(0, kCap) + "\" …truncated" : v + "\"";
+        return out;
+    };
+
+    std::string d = "\n"
+         "  ┌─ ChatRequest → pretzel-ai ─────────────────────────────────────────\n";
+    d += "  │ model           " + val(r.model())          + "\n";
+    d += "  │ message         " + val(r.message())        + "\n";
+    d += "  │ system_prompt   " + val(r.system_prompt())  + "\n";
+    d += "  │ session_id      " + val(r.session_id())     + "\n";
+    d += "  │ transaction_id  " + val(r.transaction_id()) + "\n";
+    d += "  │ history         " + std::to_string(r.history_size()) + " turn(s)\n";
+    d += "  └────────────────────────────────────────────────────────────────────\n";
+    return d;
+}
+}  // namespace
+
 GrpcClient::Outcome GrpcClient::chat(const std::string& model,
                                               const std::string& message,
                                               const std::string& systemPrompt,
                                               const std::vector<GrpcMessage::Turn>& history,
                                               const std::string& sessionId,
+                                              const std::string& transactionId,
                                               const std::function<void(const std::string&)>& on_delta)
 {
     v1::ChatRequest request;
@@ -55,6 +98,7 @@ GrpcClient::Outcome GrpcClient::chat(const std::string& model,
     request.set_message(message);
     request.set_system_prompt(systemPrompt);
     request.set_session_id(sessionId);
+    request.set_transaction_id(transactionId);
 
     // Oldest first, and `message` is not among them: the server appends this turn after the ones
     // sent here, so including it would ask the question twice.
@@ -64,6 +108,8 @@ GrpcClient::Outcome GrpcClient::chat(const std::string& model,
         out->set_role(turn.role);
         out->set_content(turn.content);
     }
+
+    LOG_DEBUG("{}", dumpChatRequest(request));
 
     grpc::ClientContext ctx;
     std::unique_ptr<grpc::ClientReader<v1::ChatChunk>> reader(
@@ -110,6 +156,22 @@ std::string toJson(const google::protobuf::Message& message)
     return out;
 }
 
+}
+
+std::string GrpcClient::listModels(std::string& error)
+{
+    grpc::ClientContext ctx;
+    v1::ListModelsRequest request;
+    v1::ModelList reply;
+    const grpc::Status status = m_impl->stub->ListModels(&ctx, request, &reply);
+    if (!status.ok())
+    {
+        error = "gRPC transport error: " + status.error_message();
+        return {};
+    }
+    if (!reply.error().empty())
+        error = reply.error();
+    return toJson(reply);
 }
 
 std::string GrpcClient::corpusStatus(std::string& error)

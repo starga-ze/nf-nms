@@ -57,9 +57,6 @@ void WebService::handleIpcEvent(MgmtdServiceManager& sm, const WebIpcEvent& even
     case WebIpcEventType::ApiConnectorTestResponse:
         return m_apiController.onTestResponse(sm, *msg);
 
-    case WebIpcEventType::GatewayCredentialStoreResponse:
-        return m_gatewayController.onCredentialStoreResponse(sm, *msg);
-
     default:
         LOG_WARN("unhandled web IPC event (type={})", static_cast<std::uint32_t>(event.type()));
         return;
@@ -182,6 +179,8 @@ WebService::Resolved WebService::resolve(const std::string& method, const std::s
         // by method as well, so neither can shadow the other.
         {"POST", "/api/chat",
             Match::Exact,  WebRoute::ChatSend,          Access::Authenticated, false},
+        {"GET",  "/api/chat/models",
+            Match::Exact,  WebRoute::ChatModels,        Access::Authenticated, false},
         {"GET",  "/api/chat/result",
             Match::Prefix, WebRoute::ChatResult,        Access::Authenticated, false},
 
@@ -235,13 +234,6 @@ WebService::Resolved WebService::resolve(const std::string& method, const std::s
 
         {"GET",  "/api/techdoc/documents",
             Match::Prefix, WebRoute::TechDocDocuments,  Access::Authenticated, false},
-
-        // AI gateway credential. The secret is write-only: it goes in through the POST and never
-        // comes back out, so there is no GET that returns it — only the status row.
-        {"POST", "/api/gateway/credential",
-            Match::Exact,  WebRoute::GatewayCredential,  Access::Authenticated, false},
-        {"GET",  "/api/gateway/status",
-            Match::Prefix, WebRoute::GatewayStatus,      Access::Authenticated, false},
 
         // Logs.
         {"GET",  "/api/logs",
@@ -335,11 +327,9 @@ void WebService::route(MgmtdServiceManager& sm, const Request& req, Response& re
     case WebRoute::CollectionSamples:  return m_collectionController.samples(sm, req, resp);
     case WebRoute::CollectionSample:   return m_collectionController.sample(sm, req, resp);
 
-    case WebRoute::GatewayCredential:   return m_gatewayController.credentialStore(sm, req, resp);
-    case WebRoute::GatewayStatus:      return m_gatewayController.status(sm, req, resp);
-
     case WebRoute::ChatSend:           return m_chatController.send(sm, req, resp);
     case WebRoute::ChatResult:         return m_chatController.result(sm, req, resp);
+    case WebRoute::ChatModels:         return m_chatController.models(sm, req, resp);
 
     case WebRoute::TechDocStatus:      return m_techDocController.status(sm, req, resp);
     case WebRoute::TechDocResult:      return m_techDocController.result(sm, req, resp);

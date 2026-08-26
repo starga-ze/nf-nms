@@ -129,7 +129,7 @@ struct GrpcClientHandler::Impl
                 pending.clear();
             };
             auto outcome = client.chat(task.model, task.message, task.systemPrompt,
-                                       task.history, task.sessionId,
+                                       task.history, task.sessionId, task.transactionId,
                                        [&](const std::string& delta)
                                        { pending += delta; flush(false); });
             flush(true);
@@ -137,6 +137,9 @@ struct GrpcClientHandler::Impl
             error = std::move(outcome.error);
             break;
         }
+        case GrpcCmd::ListModels:
+            json = client.listModels(error);
+            break;
         case GrpcCmd::CorpusStatus:
             json = client.corpusStatus(error);
             break;
