@@ -14,6 +14,7 @@ COMMAND_MAP = {
     "reset": "script/reset.py",
     "front": "script/front.py",
     "tar": "script/tar.py",
+    "package": "script/package.py",
 }
 
 # front writes into /opt/pretzel/share, which is root-owned.
@@ -35,7 +36,7 @@ def ensure_root(cmd):
 
 def main():
     if len(sys.argv) < 2:
-        print("Usage: ./pretzel [build|test|clean|install|uninstall|start|stop|reset|front|tar]")
+        print("Usage: ./pretzel [build|test|clean|install|uninstall|start|stop|reset|front|tar|package]")
         sys.exit(1)
 
     cmd = sys.argv[1]
