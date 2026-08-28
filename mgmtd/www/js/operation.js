@@ -18,7 +18,7 @@
 
   window.NMS = window.NMS || {};
 
-  const activeTab = () => new URLSearchParams(location.search).get('tab') || 'sites';
+  const activeTab = () => new URLSearchParams(location.search).get('tab') || window.NMS.settingsDefaultTab;
   const { esc } = window.NMS.utils;
   const modal = () => window.NMS.modal;
 

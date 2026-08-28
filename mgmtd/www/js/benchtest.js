@@ -25,11 +25,41 @@
   const fmtTs = (s) => window.NMS.utils.fmtTs(s);
 
   const PAGE = 50;
+  // 레일 접힘 상태. 화면마다 따로 기억한다 — 세트를 고르는 중과 결과를 읽는 중은
+  // 필요한 화면 폭이 다르다.
+  const RAIL_KEY = 'pz.benchtest.rail.test';
+  const railOpen = () => localStorage.getItem(RAIL_KEY) !== '0';
+
+  // 필터 칩 줄 접힘. 대분류 10 + 검사 시점 5 + 구분 2 + 언어 3 이라 펼친 채로는 표가 시작하기
+  // 전에 화면 절반이 지나간다. 접어도 무엇이 걸려 있는지는 헤더 요약으로 남는다 — 접힌 필터가
+  // 조용히 표를 좁히고 있으면 "왜 30건뿐이지"를 매번 다시 찾게 된다.
+  const BREAKS_KEY = 'pz.benchtest.breaks.test';
+  const breaksOpen = () => localStorage.getItem(BREAKS_KEY) !== '0';
+
   const PICK_KEY = 'pz.benchtest.set';
 
   // Filter columns the server accepts. Closed here so a stale bookmark cannot put an arbitrary
   // column name into the query string and have the page render a control for it.
-  const FILTERS = ['category', 'verdict', 'language', 'technique'];
+  const FILTERS = ['category', 'verdict', 'language', 'technique', 'checkpoint'];
+
+  // 대분류 열 개. 서버가 주는 by_category 순서는 알파벳순이라, 사람이 읽는 순서(사용자 입력 →
+  // 서비스 응답 → 도구 → 외부 지식)와 다르다. 칩을 그 순서로 세우려고 목록을 여기 둔다.
+  // 한글 이름도 같이 들고 있는 이유는 세트가 category_ko 를 행마다 싣고 다니지만 요약 버킷에는
+  // 코드만 오기 때문이다.
+  const CATEGORIES = [
+    ['direct_injection',     '직접 프롬프트 인젝션'],
+    ['pii_input',            '민감정보 입력'],
+    ['malicious_url_input',  '악성 URL 유입'],
+    ['toxic_response',       '유해·부적절 응답'],
+    ['pii_leak',             '민감정보 누출·노출'],
+    ['malicious_url_output', '악성 URL 응답'],
+    ['db_attack',            'DB 공격 쿼리·내부 자원 접근'],
+    ['ungrounded_response',  '근거 없는 응답(환각)'],
+    ['rag_poisoning',        'RAG 데이터 오염'],
+    ['indirect_injection',   '간접 프롬프트 인젝션'],
+  ];
+  const CATEGORY_KO = new Map(CATEGORIES);
+  const CATEGORY_ORDER = new Map(CATEGORIES.map(([c], i) => [c, i]));
 
   const state = {
     sets: null,        // BenchmarkDataset[] | null while unread
@@ -38,7 +68,7 @@
     rows: [],
     total: 0,
     offset: 0,
-    filters: { category: '', verdict: '', language: '', technique: '' },
+    filters: { category: '', verdict: '', language: '', technique: '', checkpoint: '' },
     search: '',
     sort: 'row_no',      // 'row_no' (the file's own order) | 'prompt_id'
     desc: false,
@@ -152,13 +182,13 @@
 
   function railHtml() {
     if (state.sets === null) {
-      return `<aside class="bt-rail"><div class="bt-rail-empty">loading…</div></aside>`;
+      return `<aside class="bt-rail"><div class="bt-rail-stub" id="btRailStub" title="패널 펼치기"><span class="bt-rail-chev"></span><span class="bt-rail-stub-t">Sets</span></div><div class="bt-rail-empty">loading…</div></aside>`;
     }
     if (!state.sets.length) {
       // The page cannot fix this, and the place that can is one specific screen — so name it
       // rather than leaving an empty panel with nothing to act on.
-      return `<aside class="bt-rail">
-          <div class="bt-rail-h">Sets</div>
+      return `<aside class="bt-rail"><div class="bt-rail-stub" id="btRailStub" title="패널 펼치기"><span class="bt-rail-chev"></span><span class="bt-rail-stub-t">Sets</span></div>
+          <div class="bt-rail-h"><span class="bt-rail-t">Sets</span><button type="button" class="bt-rail-x" id="btRailX" title="패널 접기 / 펼치기" aria-label="패널 접기 / 펼치기"><span class="bt-rail-chev"></span></button></div>
           <div class="bt-rail-empty">
             <p>No benchtest set has been imported yet.</p>
             <p class="bt-rail-hint">Import a <code>.jsonl</code> from
@@ -174,13 +204,23 @@
           <span class="bt-set-when">${esc(fmtTs(s.uploaded_at))}</span>
         </button>`;
     }).join('');
-    return `<aside class="bt-rail">
-        <div class="bt-rail-h">Sets<span class="bt-rail-n">${state.sets.length}</span></div>
+    return `<aside class="bt-rail"><div class="bt-rail-stub" id="btRailStub" title="패널 펼치기"><span class="bt-rail-chev"></span><span class="bt-rail-stub-t">Sets</span></div>
+        <div class="bt-rail-h"><span class="bt-rail-t">Sets</span><span class="bt-rail-n">${state.sets.length}</span><button type="button" class="bt-rail-x" id="btRailX" title="패널 접기 / 펼치기" aria-label="패널 접기 / 펼치기"><span class="bt-rail-chev"></span></button></div>
         <div class="bt-rail-list">${items}</div>
       </aside>`;
   }
 
   // ── Header band ─────────────────────────────────────────────────────────────
+
+  // 서버가 준 카테고리 버킷을 사람이 읽는 순서로 세운다. 목록에 없는 코드(다른 데서 만든 세트)는
+  // 버리지 않고 뒤에 붙인다 — 콘솔이 모르는 값이라고 세트의 일부를 감추면 총합이 안 맞는다.
+  function orderedCategories(items) {
+    return (items || []).slice().sort((a, b) => {
+      const ia = CATEGORY_ORDER.has(a.key) ? CATEGORY_ORDER.get(a.key) : 999;
+      const ib = CATEGORY_ORDER.has(b.key) ? CATEGORY_ORDER.get(b.key) : 999;
+      return ia - ib || String(a.key).localeCompare(String(b.key));
+    });
+  }
 
   function breakdown(label, items, key) {
     if (!items || !items.length) return '';
@@ -240,12 +280,37 @@
             <div><dt>Digest</dt><dd><code>${esc(String(set.content_sha || '').slice(0, 12))}</code></dd></div>
           </dl>
         </div>
-        <div class="bm-breaks">
-          ${breakdown('Category', s.by_category, 'category')}
-          ${breakdown('Verdict', s.by_verdict, 'verdict')}
-          ${breakdown('Language', s.by_language, 'language')}
+        ${breaksToggleHtml()}
+        <div class="bm-breaks${breaksOpen() ? '' : ' is-shut'}">
+          ${breakdown('Category', orderedCategories(s.by_category), 'category')}
+          <div class="bm-breaks-row2">
+            ${breakdown('Checkpoint', s.by_checkpoint, 'checkpoint')}
+            ${breakdown('Verdict', s.by_verdict, 'verdict')}
+            ${breakdown('Language', s.by_language, 'language')}
+          </div>
         </div>
       </section>`;
+  }
+
+  // 접었을 때 무엇이 걸려 있는지 한 줄로. 걸린 것이 없으면 요약도 없다 — 빈 라벨이 붙어 있으면
+  // 필터가 있는지 없는지를 눈이 매번 확인하게 된다.
+  function activeSummary() {
+    const on = FILTERS.filter(k => state.filters[k]).map(k => state.filters[k]);
+    if (state.search) on.push('"' + state.search + '"');
+    return on.join(' · ');
+  }
+
+  function breaksToggleHtml() {
+    const open = breaksOpen();
+    const sum = open ? '' : activeSummary();
+    return `<div class="bm-breaks-h">
+        <button type="button" class="bm-breaks-tog" id="bmBreaksTog"
+                aria-expanded="${open ? 'true' : 'false'}"
+                title="${open ? '필터 접기' : '필터 펼치기'}">
+          <span class="bm-breaks-chev"></span>Filters
+        </button>
+        ${sum ? `<span class="bm-breaks-sum">${esc(sum)}</span>` : ''}
+      </div>`;
   }
 
   // ── Filter bar ──────────────────────────────────────────────────────────────
@@ -281,7 +346,7 @@
       <div class="bm-bar">
         <select class="bm-select" id="bmTechnique">${techniqueOptions()}</select>
         <input class="bm-search" id="bmSearch" type="search" spellcheck="false"
-               placeholder="Search prompt text or id" value="${esc(state.search)}" />
+               placeholder="Search contents or id" value="${esc(state.search)}" />
         <button type="button" class="bm-clear${any ? '' : ' is-off'}" id="bmClear">Clear</button>
         <div class="bm-count">${countLabel()}</div>
         <button type="button" class="bm-test" id="bmTest"${state.total ? '' : ' disabled'}>Test</button>
@@ -289,19 +354,11 @@
   }
 
   // ── Table ───────────────────────────────────────────────────────────────────
-
-  // One line of the prompt: enough to tell two rows apart without pretending the cell holds the
-  // prompt. The whole thing lives in the drawer.
-  function firstLine(text) {
-    const line = String(text || '').split('\n').find(l => l.trim()) || '';
-    return line.length > 140 ? line.slice(0, 140) + '…' : line;
-  }
-
   function rowsHtml() {
     if (state.error) return `<div class="bm-empty bm-empty-err">${esc(state.error)}</div>`;
     if (!state.setId) return `<div class="bm-empty">No set selected.</div>`;
     if (state.loading && !state.rows.length) return `<div class="bm-empty">loading…</div>`;
-    if (!state.rows.length) return `<div class="bm-empty">No prompt matches these filters.</div>`;
+    if (!state.rows.length) return `<div class="bm-empty">No case matches these filters.</div>`;
 
     const body = state.rows.map((r, i) => {
       const attack = r.verdict === 'malicious';
@@ -309,14 +366,16 @@
       return `<tr class="bm-row${sel}" data-id="${esc(r.prompt_id)}">
           <td class="bm-c-no">${state.offset + i + 1}</td>
           <td class="bm-c-id"><code>${esc(r.prompt_id)}</code></td>
-          <td class="bm-c-cat"><span class="bm-cat">${esc(r.category)}</span></td>
+          <td class="bm-c-cat" title="${esc(r.category_ko || '')}">
+            <span class="bm-cat">${esc(CATEGORY_KO.get(r.category) || r.category)}</span>
+          </td>
+          <td class="bm-c-cp">${esc(r.checkpoint)}</td>
           <td class="bm-c-tech">${esc(r.technique)}</td>
           <td class="bm-c-lang">${esc(r.language)}</td>
           <td class="bm-c-exp">
-            <span class="bm-exp ${attack ? 'is-block' : 'is-allow'}">${esc(r.expected)}</span>
+            <span class="bm-exp ${attack ? 'is-block' : 'is-allow'}">${esc(r.expected_action)}</span>
           </td>
-          <td class="bm-c-det">${esc((r.expected_labels || []).join(', '))}</td>
-          <td class="bm-c-prompt">${esc(firstLine(r.prompt))}</td>
+          <td class="bm-c-det">${esc((r.expected_detector || []).join(', '))}</td>
         </tr>`;
     }).join('');
 
@@ -328,8 +387,8 @@
               title="Order as the file has them">#${sorted ? '' : ' ' + arrow}</th>
           <th class="bm-th-sort${sorted ? ' is-on' : ''}" data-sort="prompt_id"
               title="Order by prompt id">ID${sorted ? ' ' + arrow : ''}</th>
-          <th>Cat</th><th>Technique</th><th>Lang</th>
-          <th>Expected</th><th>Detector</th><th>Prompt</th>
+          <th>Category</th><th>Checkpoint</th><th>Technique</th><th>Lang</th>
+          <th>Expected action</th><th>Expected detector</th>
         </tr></thead>
         <tbody>${body}</tbody>
       </table>`;
@@ -388,20 +447,32 @@
     });
   }
 
+  // Raw Contents — 요청 본문 그대로 한 블록.
+  //
+  // 처음에는 원소별로 펴서 tool_event 의 metadata 를 표로, input/output 을 따로 그렸다. 그런데
+  // 그러면 도구 케이스만 다른 화면처럼 보인다 — 프롬프트 케이스는 pre 한 덩어리인데 도구
+  // 케이스는 dl 과 pre 가 섞인 3단 구조라, 같은 표에서 넘어온 두 행이 다른 제품처럼 읽혔다.
+  // 어차피 이 블록을 여는 사람은 "실제로 무엇이 나갔나"를 보려는 것이므로, 나간 그대로 보인다.
+  function contentsHtml(r) {
+    let text = r.contents_json || '';
+    try { text = JSON.stringify(JSON.parse(text), null, 2); } catch (e) { /* as-is */ }
+    return `<div class="bm-drawer-label">Raw Contents</div>
+            <pre class="bm-prompt">${esc(text || '—')}</pre>`;
+  }
+
   function drawerHtml() {
     const r = state.rows.find(x => x.prompt_id === state.selected);
     if (!r) return '';
     const meta = [
       ['Line in file', r.row_no],
-      ['Category', [r.category, r.category_ko].filter(Boolean).join(' · ')],
+      ['Category', [CATEGORY_KO.get(r.category) || r.category_ko, r.category]
+        .filter(Boolean).join(' · ')],
+      ['Checkpoint', r.checkpoint],
       ['Technique', r.technique],
       ['Verdict', r.verdict],
-      ['Expected', r.expected],
-      ['Scan target', r.scan_target],
+      ['Expected action', r.expected_action],
+      ['Expected detector', (r.expected_detector || []).join(', ')],
       ['Language', r.language],
-      ['Severity', r.severity],
-      ['Detector', (r.expected_labels || []).join(', ')],
-      ['Origin', r.origin],
     ].filter(([, v]) => v !== '' && v !== null && v !== undefined)
      .map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`).join('');
 
@@ -421,8 +492,7 @@
           <button type="button" class="bm-drawer-x" id="bmDrawerX" aria-label="Close">×</button>
         </div>
         <dl class="bm-drawer-meta">${meta}</dl>
-        <div class="bm-drawer-label">Prompt</div>
-        <pre class="bm-prompt">${esc(r.prompt)}</pre>
+        ${contentsHtml(r)}
         ${extra}`;
   }
 
@@ -431,7 +501,7 @@
   function paint() {
     const root = document.getElementById('contentBody');
     if (!root) return;
-    root.className = 'content-body bt-page';
+    root.className = 'content-body bt-page' + (railOpen() ? '' : ' is-rail-shut');
     root.innerHTML =
       railHtml() +
       `<div class="bt-main">
@@ -462,6 +532,23 @@
   function wire() {
     const root = document.getElementById('contentBody');
     if (!root) return;
+
+    // 레일 접기. 상태만 바꾸고 다시 그린다 — 클래스를 직접 토글하면 다음 paint 에서 되돌아온다.
+    const railToggle = () => {
+      localStorage.setItem(RAIL_KEY, railOpen() ? '0' : '1');
+      paint();
+    };
+    const rx = root.querySelector('#btRailX');
+    if (rx) rx.addEventListener('click', (e) => { e.stopPropagation(); railToggle(); });
+    const rs = root.querySelector('#btRailStub');
+    if (rs) rs.addEventListener('click', railToggle);
+
+    // 필터 줄 접기. 레일과 같은 규칙 — 상태만 바꾸고 다시 그린다.
+    root.querySelector('#bmBreaksTog')?.addEventListener('click', () => {
+      localStorage.setItem(BREAKS_KEY, breaksOpen() ? '0' : '1');
+      paint();
+    });
+
 
     root.querySelectorAll('.bt-set').forEach(el => {
       el.addEventListener('click', () => {

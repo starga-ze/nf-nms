@@ -85,6 +85,9 @@ struct GrpcMessage
     std::string verdict;
     std::string language;
     std::string technique;
+    // 데이터셋 v2의 검사 시점. 같은 위협이 채널마다 다른 시점에서 잡히므로, 세트를 이 축으로
+    // 자르지 못하면 정탐율이 무엇의 정탐율인지 화면에서 알 수 없다.
+    std::string checkpoint;
     std::string search;
     std::int32_t offset{0};
     std::int32_t limit{0};
@@ -167,6 +170,7 @@ struct GrpcMessage
     static GrpcMessage benchtestRows(std::uint32_t ticket, std::int64_t datasetId,
                                      std::string category, std::string verdict,
                                      std::string language, std::string technique,
+                                     std::string checkpoint,
                                      std::string search, std::int32_t offset, std::int32_t limit,
                                      std::string orderBy, bool descending)
     {
@@ -178,6 +182,7 @@ struct GrpcMessage
         out.verdict = std::move(verdict);
         out.language = std::move(language);
         out.technique = std::move(technique);
+        out.checkpoint = std::move(checkpoint);
         out.search = std::move(search);
         out.offset = offset;
         out.limit = limit;

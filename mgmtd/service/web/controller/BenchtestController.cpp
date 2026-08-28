@@ -160,8 +160,13 @@ void BenchtestController::rows(MgmtdServiceManager& sm, const pz::http::HttpRequ
     const std::string verdict = queryParam(req.target, "verdict");
     const std::string language = queryParam(req.target, "language");
     const std::string technique = queryParam(req.target, "technique");
+    // 검사 시점 값은 "tool_event (output)" 처럼 공백과 괄호를 포함한다. validFilter는
+    // 컬럼 이름을 위한 검사라 여기에 쓰면 정상 값을 거부하므로, 길이만 본다.
+    const std::string checkpoint = queryParam(req.target, "checkpoint");
     if (!validFilter(category) || !validFilter(verdict) || !validFilter(language)
         || !validFilter(technique))
+        return fill(resp, 400, R"({"error":"invalid filter"})");
+    if (checkpoint.size() > kMaxSearchChars)
         return fill(resp, 400, R"({"error":"invalid filter"})");
 
     const std::string search = queryParam(req.target, "q");
@@ -176,6 +181,7 @@ void BenchtestController::rows(MgmtdServiceManager& sm, const pz::http::HttpRequ
     const std::uint32_t ticket = sm.nextChatTicket();
     sm.txRouter().handleGrpcMessage(
         GrpcMessage::benchtestRows(ticket, datasetId, category, verdict, language, technique,
+                                   checkpoint,
                                    search, intParam(req, "offset", 0), intParam(req, "limit", 50),
                                    orderBy, queryParam(req.target, "desc") == "1"));
     accepted(resp, ticket);
@@ -299,10 +305,13 @@ void BenchtestController::runInfo(MgmtdServiceManager& sm, const pz::http::HttpR
     message.verdict = queryParam(req.target, "verdict");
     message.language = queryParam(req.target, "language");
     message.technique = queryParam(req.target, "technique");
+    // 공백과 괄호를 포함하므로 rows() 와 같이 길이만 본다 — validFilter 는 컬럼 이름용이다.
+    message.checkpoint = queryParam(req.target, "checkpoint");
     message.search = queryParam(req.target, "q");
     if (!validFilter(message.category) || !validFilter(message.verdict)
         || !validFilter(message.language) || !validFilter(message.technique)
-        || message.search.size() > kMaxSearchChars)
+        || message.search.size() > kMaxSearchChars
+        || message.checkpoint.size() > kMaxSearchChars)
         return fill(resp, 400, R"({"error":"invalid filter"})");
 
     const std::uint32_t ticket = message.ticket;
@@ -328,8 +337,11 @@ void BenchtestController::cases(MgmtdServiceManager& sm, const pz::http::HttpReq
     const std::string verdict = queryParam(req.target, "verdict");
     const std::string language = queryParam(req.target, "language");
     const std::string technique = queryParam(req.target, "technique");
+    const std::string checkpoint = queryParam(req.target, "checkpoint");
     if (!validFilter(category) || !validFilter(verdict) || !validFilter(language)
         || !validFilter(technique))
+        return fill(resp, 400, R"({"error":"invalid filter"})");
+    if (checkpoint.size() > kMaxSearchChars)
         return fill(resp, 400, R"({"error":"invalid filter"})");
 
     const std::string search = queryParam(req.target, "q");
@@ -343,6 +355,7 @@ void BenchtestController::cases(MgmtdServiceManager& sm, const pz::http::HttpReq
     message.verdict = verdict;
     message.language = language;
     message.technique = technique;
+    message.checkpoint = checkpoint;
     message.search = search;
     message.orderBy = validFilter(queryParam(req.target, "sort"))
                           ? queryParam(req.target, "sort") : std::string();

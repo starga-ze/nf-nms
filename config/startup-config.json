@@ -178,5 +178,46 @@
                 "tls_enabled": false
             }
         }
+    },
+    "//pretzel-ai": "The inference service. Not an IPC daemon — it is reached over gRPC — but its",
+    "//pretzel-ai2": "deployment is operator-declared and versioned like everything else here.",
+    "//pretzel-ai3": "route.llm decides who serves the completion, route.guardrail who owns the",
+    "//pretzel-ai4": "inspection; the two are independent. NO KEYS: the gateway subscription key is",
+    "//pretzel-ai5": "held sealed in ai_gateway_credential_state, and the model catalog is read back",
+    "//pretzel-ai6": "over ListModels rather than declared.",
+    "pretzel-ai": {
+        "daemon_name": "pz-pretzel-ai",
+        "service": {
+            "route": {
+                "llm": "gateway",
+                "guardrail": "gateway",
+                "require_guardrail": false
+            },
+            "gateway": {
+                "id": "portkey",
+                "host": "aigw.portkey.ai",
+                "port": 443,
+                "tls": true,
+                "path": "/v1/chat/completions",
+                "default_model": "@openai/gpt-4o-2024-11-20",
+                "system_prompt": "You are the internal assistant for this company. Answer in the language the user writes in. If you do not know, say so rather than guessing.",
+                "max_tokens": 512,
+                "timeout_sec": 45
+            },
+            "airs": {
+                "endpoint": "https://service.api.aisecurity.paloaltonetworks.com",
+                "profile_name": "AIRS_Security_Profile",
+                "profile_id": "",
+                "timeout_sec": 30,
+                "fail_open": false
+            },
+            "providers": {
+                "list": [
+                    { "id": "openai",    "url": "https://api.openai.com/v1/chat/completions" },
+                    { "id": "anthropic", "url": "https://api.anthropic.com/v1/chat/completions" },
+                    { "id": "google",    "url": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions" }
+                ]
+            }
+        }
     }
 }

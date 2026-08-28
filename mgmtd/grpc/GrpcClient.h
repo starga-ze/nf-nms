@@ -92,7 +92,8 @@ public:
     std::string benchtestSummary(std::int64_t datasetId, std::string& error);
     std::string benchtestRows(std::int64_t datasetId, const std::string& category,
                               const std::string& verdict, const std::string& language,
-                              const std::string& technique, const std::string& search,
+                              const std::string& technique, const std::string& checkpoint,
+                              const std::string& search,
                               std::int32_t offset, std::int32_t limit,
                               const std::string& orderBy, bool descending, std::string& error);
     std::string benchtestUpload(const std::string& content, const std::string& filename,
@@ -126,11 +127,13 @@ public:
     std::string benchtestRuns(std::int64_t datasetId, std::int32_t limit, std::string& error);
     std::string benchtestRunInfo(std::int64_t runId, const std::string& category,
                                  const std::string& verdict, const std::string& language,
-                                 const std::string& technique, const std::string& search,
+                                 const std::string& technique, const std::string& checkpoint,
+                                 const std::string& search,
                                  std::string& error);
     std::string benchtestCases(std::int64_t runId, const std::string& cause,
                                const std::string& category, const std::string& verdict,
                                const std::string& language, const std::string& technique,
+                               const std::string& checkpoint,
                                const std::string& search, const std::string& orderBy,
                                bool descending,
                                std::int32_t offset, std::int32_t limit, std::string& error);

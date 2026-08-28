@@ -85,12 +85,19 @@
   // One definition drives both navigation levels: the sidebar flyout lists the groups, and the
   // topbar shows the tabs of whichever group is open. Grouped by what the operator is working
   // on rather than by data type —
+  //   AI Assistant       who answers a turn and who inspects it (the pretzel-ai deployment)
   //   Site Management    where things are, and what is there (a Site is one customer)
   //   API Profile        the reusable definitions a connector references
   //   API Connector      binding a device + credential + endpoints on a schedule
   //   System Management  this appliance, not the managed estate
   // A group with a single tab renders no tab row; its name in the sidebar is the whole story.
+  //
+  // AI Assistant sits first because it is the only group that configures a security boundary:
+  // every other group describes the estate being managed, this one decides whether the turns
+  // this appliance serves are inspected at all, and by whom.
   const SETTINGS_GROUPS = [
+    { id: 'ai-assistant', label: 'AI Assistant', tabs: [
+        { id: 'ai-assistant', label: 'AI Assistant' } ] },
     { id: 'site-management', label: 'Site Management', tabs: [
         { id: 'sites',        label: 'Sites'        },
         { id: 'devices',      label: 'Devices'      } ] },
@@ -105,6 +112,11 @@
   ];
 
   const SETTINGS_TABS = SETTINGS_GROUPS.reduce((acc, g) => acc.concat(g.tabs), []);
+  // Where a bare /settings (no ?tab=) lands. Published because the tab modules resolve the same
+  // fallback independently — each renders only when its own tab is active, so a module hard-coding
+  // a different default would paint its page under another group's heading.
+  window.NMS = window.NMS || {};
+  window.NMS.settingsDefaultTab = SETTINGS_TABS[0].id;
   const groupOfTab = (tabId) =>
     SETTINGS_GROUPS.find(g => g.tabs.some(t => t.id === tabId)) || SETTINGS_GROUPS[0];
 

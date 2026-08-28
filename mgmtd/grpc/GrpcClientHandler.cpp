@@ -166,7 +166,8 @@ struct GrpcClientHandler::Impl
         }
         case GrpcCmd::BenchtestRows:
             json = client.benchtestRows(task.datasetId, task.category, task.verdict,
-                                        task.language, task.technique, task.search,
+                                        task.language, task.technique, task.checkpoint,
+                                        task.search,
                                         task.offset, task.limit, task.orderBy,
                                         task.descending, error);
             break;
@@ -182,12 +183,13 @@ struct GrpcClientHandler::Impl
             break;
         case GrpcCmd::BenchtestRunInfo:
             json = client.benchtestRunInfo(task.runId, task.category, task.verdict,
-                                           task.language, task.technique, task.search, error);
+                                           task.language, task.technique, task.checkpoint,
+                                           task.search, error);
             break;
         case GrpcCmd::BenchtestCases:
             json = client.benchtestCases(task.runId, task.cause, task.category, task.verdict,
-                                         task.language, task.technique, task.search,
-                                         task.orderBy, task.descending,
+                                         task.language, task.technique, task.checkpoint,
+                                         task.search, task.orderBy, task.descending,
                                          task.offset, task.limit, error);
             break;
         case GrpcCmd::BenchtestCase:

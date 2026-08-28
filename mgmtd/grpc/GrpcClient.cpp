@@ -251,7 +251,8 @@ std::string GrpcClient::benchtestSummary(std::int64_t datasetId, std::string& er
 
 std::string GrpcClient::benchtestRows(std::int64_t datasetId, const std::string& category,
                                       const std::string& verdict, const std::string& language,
-                                      const std::string& technique, const std::string& search,
+                                      const std::string& technique, const std::string& checkpoint,
+                                      const std::string& search,
                                       std::int32_t offset, std::int32_t limit,
                                       const std::string& orderBy, bool descending,
                                       std::string& error)
@@ -262,6 +263,7 @@ std::string GrpcClient::benchtestRows(std::int64_t datasetId, const std::string&
     request.set_verdict(verdict);
     request.set_language(language);
     request.set_technique(technique);
+    request.set_checkpoint(checkpoint);
     request.set_search(search);
     request.set_offset(offset);
     request.set_limit(limit);
@@ -405,7 +407,9 @@ std::string GrpcClient::benchtestRuns(std::int64_t datasetId, std::int32_t limit
 
 std::string GrpcClient::benchtestRunInfo(std::int64_t runId, const std::string& category,
                                          const std::string& verdict, const std::string& language,
-                                         const std::string& technique, const std::string& search,
+                                         const std::string& technique,
+                                         const std::string& checkpoint,
+                                         const std::string& search,
                                          std::string& error)
 {
     v1::GetBenchtestRunRequest request;
@@ -414,6 +418,7 @@ std::string GrpcClient::benchtestRunInfo(std::int64_t runId, const std::string& 
     request.set_verdict(verdict);
     request.set_language(language);
     request.set_technique(technique);
+    request.set_checkpoint(checkpoint);
     request.set_search(search);
 
     grpc::ClientContext ctx;
@@ -430,6 +435,7 @@ std::string GrpcClient::benchtestRunInfo(std::int64_t runId, const std::string& 
 std::string GrpcClient::benchtestCases(std::int64_t runId, const std::string& cause,
                                        const std::string& category, const std::string& verdict,
                                        const std::string& language, const std::string& technique,
+                                       const std::string& checkpoint,
                                        const std::string& search, const std::string& orderBy,
                                        bool descending,
                                        std::int32_t offset, std::int32_t limit,
@@ -442,6 +448,7 @@ std::string GrpcClient::benchtestCases(std::int64_t runId, const std::string& ca
     request.set_verdict(verdict);
     request.set_language(language);
     request.set_technique(technique);
+    request.set_checkpoint(checkpoint);
     request.set_search(search);
     request.set_order_by(orderBy);
     request.set_descending(descending);

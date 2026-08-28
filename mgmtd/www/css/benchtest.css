@@ -1,3 +1,29 @@
+/* ══════════════════════════════════════════════════════════════════════════════════════════
+   Benchtest 타이포·색 토큰
+   ══════════════════════════════════════════════════════════════════════════════════════════
+   이 파일은 19가지 font-size 와 존재하지 않는 색 변수가 섞여 있었다. 한 화면 안에서 같은 위계의
+   글자가 11px 과 12.5px 로 갈리면 눈이 위계를 못 읽고, 미정의 변수의 폴백 상수는 테마를 따라가지
+   않아 라이트 모드에서 검은 헤더가 나왔다. 다섯 단계로 묶고 색은 pretzel 변수로만 쓴다.
+
+   다크 모드의 본문은 순백으로 올린다. pretzel 기본값(#e7eaf3)은 본문 문단에는 알맞지만,
+   1500행짜리 조밀한 표에서는 한 톤 눌린 회색으로 읽혀 스캔이 느려진다. */
+.bt-page {
+  --bt-xs: 10px;   /* 라벨, 칩 키, 메타 */
+  --bt-sm: 11px;   /* 표 본문, 보조 정보 */
+  --bt-md: 12px;   /* 드로어 본문, 컨트롤 */
+  --bt-lg: 13px;   /* 섹션 제목 */
+  --bt-xl: 24px;   /* 헤드라인 수치 */
+
+  --bt-fg:   var(--text);
+  --bt-fg-2: var(--text-secondary);
+  --bt-fg-3: var(--text-muted);
+
+  font-family: var(--font-ui);
+  color: var(--bt-fg);
+}
+
+:root[data-theme="dark"] .bt-page { --bt-fg: #ffffff; }
+
 /* benchtest.css — AI › Benchtest
  *
  * Two bands and a table. The header band carries the composition of the loaded generation, because
@@ -41,10 +67,10 @@
   justify-content: space-between;
   padding: 10px 12px;
   border-bottom: 1px solid var(--border);
-  font-size: 11px;
+  font-size: var(--bt-sm);
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: var(--text-dim);
+  color: var(--bt-fg-3);
 }
 
 .bt-rail-n { font-variant-numeric: tabular-nums; }
@@ -60,7 +86,7 @@
   border-bottom: 1px solid var(--border-soft, var(--border));
   border-left: 3px solid transparent;
   background: transparent;
-  color: var(--text);
+  color: var(--bt-fg);
   font: inherit;
   cursor: pointer;
 }
@@ -74,7 +100,7 @@
 
 .bt-set-name {
   display: block;
-  font-size: 13px;
+  font-size: var(--bt-md);
   font-weight: 550;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -83,23 +109,23 @@
 
 .bt-set-meta, .bt-set-when {
   display: block;
-  font-size: 11px;
-  color: var(--text-dim);
+  font-size: var(--bt-sm);
+  color: var(--bt-fg-3);
   font-variant-numeric: tabular-nums;
 }
 
 .bt-set-meta { margin-top: 2px; }
 
-.bt-rail-empty { padding: 16px 12px; font-size: 12px; color: var(--text-dim); line-height: 1.6; }
+.bt-rail-empty { padding: 16px 12px; font-size: var(--bt-md); color: var(--bt-fg-3); line-height: 1.6; }
 .bt-rail-empty p { margin: 0 0 8px; }
-.bt-rail-hint code { font-size: 11px; }
+.bt-rail-hint code { font-size: var(--bt-sm); }
 
 .bt-rail-link {
   display: inline-block;
   margin-top: 4px;
   color: var(--accent);
   text-decoration: none;
-  font-size: 12px;
+  font-size: var(--bt-md);
 }
 
 .bt-rail-link:hover { text-decoration: underline; }
@@ -110,12 +136,12 @@
 
 .bm-note {
   margin: 10px 0 0;
-  font-size: 12px;
-  color: var(--text-dim);
+  font-size: var(--bt-md);
+  color: var(--bt-fg-3);
 }
 
 .bm-c-no {
-  color: var(--text-dim);
+  color: var(--bt-fg-3);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -136,18 +162,18 @@
 }
 
 .bm-head-total {
-  font-size: 30px;
+  font-size: var(--bt-xl);
   font-weight: 650;
   line-height: 1.1;
   letter-spacing: -0.02em;
-  color: var(--text);
+  color: var(--bt-fg);
   font-variant-numeric: tabular-nums;
 }
 
 .bm-head-sub {
   margin-top: 2px;
-  font-size: 12px;
-  color: var(--text-dim);
+  font-size: var(--bt-md);
+  color: var(--bt-fg-3);
 }
 
 .bm-meta {
@@ -158,16 +184,16 @@
 }
 
 .bm-meta dt {
-  font-size: 11px;
+  font-size: var(--bt-sm);
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: var(--text-dim);
+  color: var(--bt-fg-3);
 }
 
 .bm-meta dd {
   margin: 2px 0 0;
-  font-size: 13px;
-  color: var(--text);
+  font-size: var(--bt-md);
+  color: var(--bt-fg);
   font-variant-numeric: tabular-nums;
 }
 
@@ -181,10 +207,10 @@
 }
 
 .bm-break-label {
-  font-size: 11px;
+  font-size: var(--bt-sm);
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: var(--text-dim);
+  color: var(--bt-fg-3);
   margin-bottom: 6px;
 }
 
@@ -203,9 +229,9 @@
   border: 1px solid var(--border);
   border-radius: 999px;
   background: var(--surface-2, transparent);
-  color: var(--text);
+  color: var(--bt-fg);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--bt-md);
   cursor: pointer;
 }
 
@@ -221,7 +247,7 @@
 
 .bm-chip-n {
   font-variant-numeric: tabular-nums;
-  color: var(--text-dim);
+  color: var(--bt-fg-3);
 }
 
 .bm-chip.is-on .bm-chip-n { color: inherit; }
@@ -242,9 +268,9 @@
   border: 1px solid var(--border);
   border-radius: 7px;
   background: var(--surface);
-  color: var(--text);
+  color: var(--bt-fg);
   font: inherit;
-  font-size: 13px;
+  font-size: var(--bt-md);
 }
 
 .bm-search { flex: 1 1 260px; min-width: 180px; }
@@ -258,9 +284,9 @@
   border: 1px solid var(--border);
   border-radius: 7px;
   background: transparent;
-  color: var(--text);
+  color: var(--bt-fg);
   font: inherit;
-  font-size: 13px;
+  font-size: var(--bt-md);
   cursor: pointer;
 }
 
@@ -268,8 +294,8 @@
 
 .bm-count {
   margin-left: auto;
-  font-size: 12px;
-  color: var(--text-dim);
+  font-size: var(--bt-md);
+  color: var(--bt-fg-3);
   font-variant-numeric: tabular-nums;
 }
 
@@ -294,7 +320,7 @@
 .bm-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 13px;
+  font-size: var(--bt-md);
 }
 
 .bm-table th {
@@ -302,11 +328,11 @@
   top: 0;
   z-index: 1;
   text-align: left;
-  font-size: 11px;
+  font-size: var(--bt-sm);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: var(--text-dim);
+  color: var(--bt-fg-3);
   background: var(--surface);
   padding: 9px 12px;
   border-bottom: 1px solid var(--border);
@@ -323,20 +349,34 @@
 .bm-row:hover { background: var(--surface-2, rgba(127, 127, 127, 0.06)); }
 .bm-row.is-sel { background: var(--accent-soft, rgba(127, 127, 127, 0.12)); }
 
-.bm-c-id code { font-size: 12px; white-space: nowrap; color: var(--text); }
+.bm-c-id code { font-size: var(--bt-md); white-space: nowrap; color: var(--bt-fg); }
 .bm-c-cat, .bm-c-lang { white-space: nowrap; }
-.bm-c-tech { white-space: nowrap; color: var(--text-dim); }
-.bm-c-det { white-space: nowrap; color: var(--text-dim); font-size: 12px; }
 
-/* The prompt is the reason the row is here, so it takes the slack and stays on one line. */
-.bm-c-prompt {
-  max-width: 0;
-  width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--text-dim);
+/* 대분류 이름이 열 개로 늘고 한글이라, 한 줄에 붙잡아 두면 표가 옆으로 밀린다. 두 줄까지 허용하고
+   그 이상은 자른다 — 전체 이름은 드로어에 있다. */
+.bm-c-cat { max-width: 12rem; white-space: normal; word-break: keep-all; line-height: 1.25; }
+
+/* 검사 시점. "tool_event (input+output)" 이 가장 길고, 이 열이 줄바꿈되면 행 높이가 들쭉날쭉해
+   표를 훑기 어려워진다. */
+.bm-c-cp {
+  /* 값이 다섯 개뿐인 분류라 monospace 로 둘 이유가 없다 — 코드가 아니라 라벨이다.
+     줄바꿈되면 행 높이가 들쭉날쭉해져 표를 훑을 수 없으므로 한 줄로 붙잡는다. */
+  white-space: nowrap; font-family: var(--font-ui);
+  font-size: var(--bt-sm); color: var(--bt-fg-2);
 }
+
+/* 드로어의 contents 블록. 판정 대상(마지막 원소)과 문맥을 눈으로 갈라야 왜 이 행이 이 결과를
+   냈는지 화면에서 읽힌다 — 왼쪽 띠 색만으로 구분한다. */
+.bm-content { border-left: 3px solid var(--border); padding-left: .75rem; margin: .75rem 0; }
+.bm-content-judged { border-left-color: var(--accent); }
+.bm-content-context { opacity: .78; }
+.bm-drawer-label.bm-sub {
+  font-size: var(--bt-sm); letter-spacing: .04em; text-transform: uppercase;
+  color: var(--bt-fg-3); margin-top: .5rem;
+}
+.bm-te-meta { margin: .25rem 0 .5rem; font-size: var(--bt-md); }
+.bm-c-tech { white-space: nowrap; color: var(--bt-fg-3); }
+.bm-c-det { white-space: nowrap; color: var(--bt-fg-3); font-size: var(--bt-md); }
 
 .bm-cat {
   display: inline-block;
@@ -352,22 +392,24 @@
   padding: 1px 7px;
   border-radius: 999px;
   border: 1px solid var(--border);
-  font-size: 11px;
+  font-size: var(--bt-sm);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
 
-.bm-exp.is-block { color: var(--danger, #b4443a); border-color: currentColor; }
-.bm-exp.is-allow { color: var(--text-dim); }
+/* 두 상태를 같은 무게로 그린다. allow 를 흐린 글자로 두면 다크 모드에서 배지로 읽히지 않고,
+   block 만 눈에 들어와 표가 한쪽으로 기운 것처럼 보인다. */
+.bm-exp.is-block { color: var(--red);   border-color: currentColor; }
+.bm-exp.is-allow { color: var(--green); border-color: currentColor; }
 
 .bm-empty {
   padding: 34px 16px;
   text-align: center;
-  font-size: 13px;
-  color: var(--text-dim);
+  font-size: var(--bt-md);
+  color: var(--bt-fg-3);
 }
 
-.bm-empty-err { color: var(--danger, #b4443a); }
+.bm-empty-err { color: var(--red); }
 
 .bm-pager {
   display: flex;
@@ -382,9 +424,9 @@
   border: 1px solid var(--border);
   border-radius: 6px;
   background: transparent;
-  color: var(--text);
+  color: var(--bt-fg);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--bt-md);
   cursor: pointer;
 }
 
@@ -440,24 +482,24 @@
 /* The id is an identifier, not a code sample. It was a <code>, which picked up the monospace
    stack and read as a different kind of thing from every other heading in the console. */
 .bm-drawer-id {
-  font-family: inherit;
-  font-size: 14px;
+  font-family: var(--font-ui);
+  font-size: var(--bt-lg);
   font-weight: 650;
   letter-spacing: -0.01em;
-  color: var(--text);
+  color: var(--bt-fg);
 }
 
 .bm-drawer-x {
   border: 0;
   background: transparent;
-  color: var(--text-dim);
-  font-size: 20px;
+  color: var(--bt-fg-3);
+  font-size: 18px;
   line-height: 1;
   cursor: pointer;
   padding: 0 2px;
 }
 
-.bm-drawer-x:hover { color: var(--text); }
+.bm-drawer-x:hover { color: var(--bt-fg); }
 
 .bm-drawer-meta {
   display: grid;
@@ -467,25 +509,25 @@
 }
 
 .bm-drawer-meta dt {
-  font-size: 10px;
+  font-size: var(--bt-xs);
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: var(--text-dim);
+  color: var(--bt-fg-3);
 }
 
 .bm-drawer-meta dd {
   margin: 1px 0 0;
-  font-size: 12px;
-  color: var(--text);
+  font-size: var(--bt-md);
+  color: var(--bt-fg);
   word-break: break-word;
 }
 
 .bm-drawer-label {
   margin: 16px 0 6px;
-  font-size: 10px;
+  font-size: var(--bt-xs);
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: var(--text-dim);
+  color: var(--bt-fg-3);
 }
 
 /* The prompt is multi-line and its line breaks carry meaning — the work-item shape is what the
@@ -496,11 +538,11 @@
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--surface-2, transparent);
-  font-size: 12px;
+  font-size: var(--bt-md);
   line-height: 1.55;
   white-space: pre-wrap;
   word-break: break-word;
-  color: var(--text);
+  color: var(--bt-fg);
 }
 
 @media (max-width: 1280px) {
@@ -520,10 +562,10 @@
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--surface-2, transparent);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 12px;
+  font-family: var(--font-mono);
+  font-size: var(--bt-md);
   line-height: 1.6;
-  color: var(--text);
+  color: var(--bt-fg);
 }
 
 .bt-problems li { word-break: break-word; }
@@ -531,7 +573,7 @@
 /* Sortable headers. The active one keeps its arrow so the order is readable without clicking to
    find out — a table that only shows its sort on hover is a table you have to poke at. */
 .bm-th-sort { cursor: pointer; user-select: none; white-space: nowrap; }
-.bm-th-sort:hover { color: var(--text); }
+.bm-th-sort:hover { color: var(--bt-fg); }
 .bm-th-sort.is-on { color: var(--accent); }
 
 /* Selected-of-total. The selected half is the number a Test run would act on, so it carries the
@@ -539,7 +581,7 @@
 .bm-sel { color: var(--accent); }
 
 .bm-of {
-  color: var(--text-dim);
+  color: var(--bt-fg-3);
   font-size: 0.62em;
   font-weight: 500;
   margin-left: 1px;
@@ -558,13 +600,13 @@
   background: transparent;
   color: var(--accent);
   font: inherit;
-  font-size: 13px;
+  font-size: var(--bt-md);
   font-weight: 550;
   cursor: pointer;
 }
 
 .bm-test:hover:not(:disabled) { background: var(--accent-soft, transparent); }
-.bm-test:disabled { opacity: 0.4; cursor: default; border-color: var(--border); color: var(--text-dim); }
+.bm-test:disabled { opacity: 0.4; cursor: default; border-color: var(--border); color: var(--bt-fg-3); }
 
 /* ── Run window ───────────────────────────────────────────────────────────── */
 
@@ -604,11 +646,11 @@
   border-bottom: 1px solid var(--border);
 }
 
-.btr-title { font-size: 15px; font-weight: 600; color: var(--text); }
-.btr-scope { margin-top: 2px; font-size: 12px; color: var(--text-dim); }
+.btr-title { font-size: var(--bt-lg); font-weight: 600; color: var(--bt-fg); }
+.btr-scope { margin-top: 2px; font-size: var(--bt-md); color: var(--bt-fg-3); }
 
 .btr-head-r { display: flex; align-items: center; gap: 10px; }
-.btr-count { font-size: 12px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.btr-count { font-size: var(--bt-md); color: var(--bt-fg-3); font-variant-numeric: tabular-nums; }
 
 .btr-btn {
   height: 30px;
@@ -618,24 +660,24 @@
   background: var(--accent);
   color: #fff;
   font: inherit;
-  font-size: 13px;
+  font-size: var(--bt-md);
   font-weight: 550;
   cursor: pointer;
 }
 
-.btr-stop { background: transparent; color: var(--danger, #b4443a); border-color: currentColor; }
+.btr-stop { background: transparent; color: var(--red); border-color: currentColor; }
 
 .btr-x {
   border: 0;
   background: transparent;
-  color: var(--text-dim);
-  font-size: 22px;
+  color: var(--bt-fg-3);
+  font-size: 18px;
   line-height: 1;
   cursor: pointer;
   padding: 0 2px;
 }
 
-.btr-x:hover { color: var(--text); }
+.btr-x:hover { color: var(--bt-fg); }
 
 /* A progress bar rather than a spinner: a run is minutes long and "how much is left" is the
    question, which a spinner cannot answer. */
@@ -644,8 +686,8 @@
 
 .btr-err {
   padding: 8px 18px;
-  font-size: 12px;
-  color: var(--danger, #b4443a);
+  font-size: var(--bt-md);
+  color: var(--red);
   border-bottom: 1px solid var(--border);
 }
 
@@ -658,17 +700,17 @@
 }
 
 .btr-stat-k {
-  font-size: 10px;
+  font-size: var(--bt-xs);
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: var(--text-dim);
+  color: var(--bt-fg-3);
 }
 
 .btr-stat-v {
-  font-size: 26px;
+  font-size: var(--bt-xl);
   font-weight: 650;
   line-height: 1.15;
-  color: var(--text);
+  color: var(--bt-fg);
   font-variant-numeric: tabular-nums;
 }
 
@@ -676,7 +718,7 @@
    for the profile to scan, so leaving them in the denominator scores the guardrail for the
    model's caution. */
 .btr-stat-v.is-adj { color: var(--accent); }
-.btr-stat-n { font-size: 11px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.btr-stat-n { font-size: var(--bt-sm); color: var(--bt-fg-3); font-variant-numeric: tabular-nums; }
 .btr-stat-wide { margin-left: auto; text-align: right; }
 
 .btr-tallies {
@@ -691,15 +733,15 @@
   padding: 2px 9px;
   border: 1px solid var(--border);
   border-radius: 999px;
-  font-size: 11px;
-  color: var(--text-dim);
+  font-size: var(--bt-sm);
+  color: var(--bt-fg-3);
   font-variant-numeric: tabular-nums;
 }
 
-.btr-tally b { color: var(--text); }
-.btr-tally.is-ok   { border-color: var(--ok, #3f8f5f); color: var(--ok, #3f8f5f); }
-.btr-tally.is-warn { border-color: var(--warn, #b8862b); color: var(--warn, #b8862b); }
-.btr-tally.is-bad  { border-color: var(--danger, #b4443a); color: var(--danger, #b4443a); }
+.btr-tally b { color: var(--bt-fg); }
+.btr-tally.is-ok   { border-color: var(--green); color: var(--green); }
+.btr-tally.is-warn { border-color: var(--orange); color: var(--orange); }
+.btr-tally.is-bad  { border-color: var(--red); color: var(--red); }
 
 .btr-body { display: flex; min-height: 0; flex: 1 1 auto; }
 .btr-list-wrap { flex: 1 1 auto; min-width: 0; display: flex; }
@@ -708,7 +750,7 @@
   flex: 1 1 auto;
   overflow-y: auto;
   padding: 8px 0;
-  font-size: 12.5px;
+  font-size: var(--bt-md);
   line-height: 1.75;
   /* Not a monospace block. The columns are held by fixed widths below, and the cause labels are
      Korean — a monospace stack has no Korean face, so every one of them fell through to a
@@ -731,35 +773,35 @@
    monospace fields read as a caption pasted next to the words rather than as the same line. The
    mono face stays only where the content is genuinely a code; it is set at the row's size and let
    to sit slightly tighter, which is enough to tell the two apart without a size change. */
-.btr-line > span { font-size: 12.5px; }
+.btr-line > span { font-size: var(--bt-md); }
 
-.btr-seq { color: var(--text-dim); min-width: 78px; text-align: right; }
+.btr-seq { color: var(--bt-fg-3); min-width: 78px; text-align: right; }
 
 .btr-id {
   min-width: 118px;
-  color: var(--text);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--bt-fg);
+  font-family: var(--font-mono);
   letter-spacing: -0.02em;
 }
 
 .btr-cause { min-width: 116px; font-weight: 600; }
-.btr-verdict { min-width: 58px; color: var(--text-dim); }
+.btr-action { min-width: 58px; color: var(--bt-fg-3); }
 
 .btr-det {
   flex: 1 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
-  color: var(--text-dim);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--bt-fg-3);
+  font-family: var(--font-mono);
   letter-spacing: -0.02em;
 }
 
-.btr-ms { color: var(--text-dim); min-width: 64px; text-align: right; }
+.btr-ms { color: var(--bt-fg-3); min-width: 64px; text-align: right; }
 
-.btr-line.is-ok   .btr-cause { color: var(--ok, #3f8f5f); }
-.btr-line.is-warn .btr-cause { color: var(--warn, #b8862b); }
-.btr-line.is-bad  .btr-cause { color: var(--danger, #b4443a); }
-.btr-line.is-skip .btr-cause { color: var(--text-dim); }
+.btr-line.is-ok   .btr-cause { color: var(--green); }
+.btr-line.is-warn .btr-cause { color: var(--orange); }
+.btr-line.is-bad  .btr-cause { color: var(--red); }
+.btr-line.is-skip .btr-cause { color: var(--bt-fg-3); }
 
 .btr-detail {
   flex: 0 0 400px;
@@ -776,20 +818,20 @@
 }
 
 .btr-detail-meta dt {
-  font-size: 10px;
+  font-size: var(--bt-xs);
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: var(--text-dim);
+  color: var(--bt-fg-3);
 }
 
-.btr-detail-meta dd { margin: 1px 0 0; font-size: 12px; color: var(--text); word-break: break-word; }
+.btr-detail-meta dd { margin: 1px 0 0; font-size: var(--bt-md); color: var(--bt-fg); word-break: break-word; }
 
 .btr-detail-k {
   margin: 14px 0 5px;
-  font-size: 10px;
+  font-size: var(--bt-xs);
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: var(--text-dim);
+  color: var(--bt-fg-3);
 }
 
 .btr-pre {
@@ -800,15 +842,15 @@
   border: 1px solid var(--border);
   border-radius: 7px;
   background: var(--surface-2, transparent);
-  font-size: 11px;
+  font-size: var(--bt-sm);
   line-height: 1.55;
   white-space: pre-wrap;
   word-break: break-word;
-  color: var(--text);
+  color: var(--bt-fg);
 }
 
-.btr-empty { padding: 30px 18px; font-size: 12px; color: var(--text-dim); line-height: 1.6; }
-.btr-empty-err { color: var(--danger, #b4443a); }
+.btr-empty { padding: 30px 18px; font-size: var(--bt-md); color: var(--bt-fg-3); line-height: 1.6; }
+.btr-empty-err { color: var(--red); }
 
 @media (max-width: 1000px) {
   .btr-body { flex-direction: column; }
@@ -819,49 +861,49 @@
 
 .btres-rates { display: flex; gap: 32px; }
 .btres-rate-k {
-  font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim);
+  font-size: var(--bt-sm); text-transform: uppercase; letter-spacing: 0.06em; color: var(--bt-fg-3);
 }
 .btres-rate-v {
-  font-size: 30px; font-weight: 650; line-height: 1.1; letter-spacing: -0.02em;
-  color: var(--text); font-variant-numeric: tabular-nums;
+  font-size: var(--bt-xl); font-weight: 650; line-height: 1.1; letter-spacing: -0.02em;
+  color: var(--bt-fg); font-variant-numeric: tabular-nums;
 }
 /* The adjusted rate is the one to read — see the note in benchtest-result.js. */
 .btres-rate-v.is-adj { color: var(--accent); }
-.btres-rate-n { margin-top: 2px; font-size: 11px; color: var(--text-dim); }
+.btres-rate-n { margin-top: 2px; font-size: var(--bt-sm); color: var(--bt-fg-3); }
 
 .btres-status {
   margin-left: 6px; padding: 0 6px; border-radius: 999px; border: 1px solid currentColor;
-  font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600;
+  font-size: var(--bt-xs); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600;
 }
-.btres-status.is-done      { color: var(--ok, #3f8f5f); }
+.btres-status.is-done      { color: var(--green); }
 .btres-status.is-running   { color: var(--accent); }
-.btres-status.is-cancelled { color: var(--text-dim); }
-.btres-status.is-failed    { color: var(--danger, #b4443a); }
+.btres-status.is-cancelled { color: var(--bt-fg-3); }
+.btres-status.is-failed    { color: var(--red); }
 
 /* Outcome chips double as the case filter, so they look pressable rather than like a legend. */
 .btres-tally {
   padding: 4px 9px; border: 1px solid var(--border); border-radius: 999px;
-  background: transparent; color: var(--text-dim); font: inherit; font-size: 12px;
+  background: transparent; color: var(--bt-fg-3); font: inherit; font-size: var(--bt-md);
   cursor: pointer; font-variant-numeric: tabular-nums;
 }
-.btres-tally b { color: var(--text); }
+.btres-tally b { color: var(--bt-fg); }
 .btres-tally:hover { border-color: var(--accent); }
 .btres-tally.is-on { border-color: var(--accent); background: var(--accent-soft, transparent); }
-.btres-tally.is-ok   { color: var(--ok, #3f8f5f); }
-.btres-tally.is-warn { color: var(--warn, #b8862b); }
-.btres-tally.is-bad  { color: var(--danger, #b4443a); }
+.btres-tally.is-ok   { color: var(--green); }
+.btres-tally.is-warn { color: var(--orange); }
+.btres-tally.is-bad  { color: var(--red); }
 
 .btres-c-cause { white-space: nowrap; font-weight: 550; }
-.btres-c-cause.is-ok   { color: var(--ok, #3f8f5f); }
-.btres-c-cause.is-warn { color: var(--warn, #b8862b); }
-.btres-c-cause.is-bad  { color: var(--danger, #b4443a); }
-.btres-c-cause.is-skip { color: var(--text-dim); }
+.btres-c-cause.is-ok   { color: var(--green); }
+.btres-c-cause.is-warn { color: var(--orange); }
+.btres-c-cause.is-bad  { color: var(--red); }
+.btres-c-cause.is-skip { color: var(--bt-fg-3); }
 
-.btres-err { margin: 10px 0 0; font-size: 12px; color: var(--danger, #b4443a); }
+.btres-err { margin: 10px 0 0; font-size: var(--bt-md); color: var(--red); }
 
 .btr-more {
   padding: 9px 18px; border-bottom: 1px solid var(--border);
-  font-size: 12px; color: var(--text-dim);
+  font-size: var(--bt-md); color: var(--bt-fg-3);
 }
 .btr-more a { color: var(--accent); text-decoration: none; }
 .btr-more a:hover { text-decoration: underline; }
@@ -875,17 +917,17 @@
   border: 1px solid var(--border);
   border-radius: 7px;
   background: var(--surface-2, transparent);
-  color: var(--text);
+  color: var(--bt-fg);
   font: inherit;
-  font-size: 12.5px;
+  font-size: var(--bt-md);
 }
 .btr-name:focus { outline: none; border-color: var(--accent); }
 
 /* Raw envelopes are read as documents, not as prose: monospace, and capped so a 4 KB response
    does not push the prompt above it off the top of the drawer. */
 .bm-prompt.is-raw {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 11px;
+  font-family: var(--font-mono);
+  font-size: var(--bt-sm);
   max-height: 320px;
   overflow: auto;
   white-space: pre;
@@ -908,11 +950,11 @@
 .btr-f { display: flex; flex-direction: column; gap: 7px; }
 
 .btr-f-k {
-  font-size: 11px;
+  font-size: var(--bt-sm);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.07em;
-  color: var(--text-dim);
+  color: var(--bt-fg-3);
 }
 
 .btr-f-k i {
@@ -931,13 +973,13 @@
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--surface-2, transparent);
-  color: var(--text);
+  color: var(--bt-fg);
   font: inherit;
-  font-size: 14px;
+  font-size: var(--bt-lg);
   transition: border-color var(--tr), box-shadow var(--tr);
 }
 
-.btr-f-v:hover { border-color: var(--text-dim); }
+.btr-f-v:hover { border-color: var(--bt-fg-3); }
 
 .btr-f-v:focus {
   outline: none;
@@ -946,17 +988,17 @@
 }
 
 /* The placeholder is the value that will be used, so it must not read as absent. */
-.btr-f-v::placeholder { color: var(--text-dim); opacity: 0.9; }
+.btr-f-v::placeholder { color: var(--bt-fg-3); opacity: 0.9; }
 
-.btr-f-hint { font-size: 11.5px; color: var(--text-dim); }
+.btr-f-hint { font-size: var(--bt-sm); color: var(--bt-fg-3); }
 
-.btres-note { margin: 10px 0 0; font-size: 12px; color: var(--text-dim); }
+.btres-note { margin: 10px 0 0; font-size: var(--bt-md); color: var(--bt-fg-3); }
 
 /* Outcome chips carry the same tone the table's cause column does, so the eye connects the two. */
-.bm-chip.is-ok   { color: var(--ok, #3f8f5f); }
-.bm-chip.is-warn { color: var(--warn, #b8862b); }
-.bm-chip.is-bad  { color: var(--danger, #b4443a); }
-.bm-chip.is-skip { color: var(--text-dim); }
+.bm-chip.is-ok   { color: var(--green); }
+.bm-chip.is-warn { color: var(--orange); }
+.bm-chip.is-bad  { color: var(--red); }
+.bm-chip.is-skip { color: var(--bt-fg-3); }
 .bm-chip.is-ok.is-on, .bm-chip.is-warn.is-on, .bm-chip.is-bad.is-on { border-color: currentColor; }
 
 .btres-rates { display: flex; gap: 30px; margin-left: 26px; }
@@ -970,3 +1012,223 @@
   display: block;
 }
 .bt-rail { flex-basis: 268px; }
+
+
+/* 기대 처분과 관측 처분을 나란히 놓는 열. 둘이 어긋난 행이 곧 미탐이거나 오탐이라, 한눈에
+   갈라져야 표를 위에서 아래로 훑을 수 있다. */
+/* ── 기대 대 관측 ──────────────────────────────────────────────────────────────
+   네 열(기대 처분 / 관측 처분 / 기대 디텍터 / 관측 디텍터)로 벌려 놓으면 표가 옆으로 밀리고,
+   읽는 사람은 매 행마다 두 칸씩 눈을 옮겨 비교해야 한다. 비교는 화면이 하고 사람은 결과만
+   보는 편이 낫다 — 한 칸에 담되, **어긋난 행만** 두 값을 다 보여준다.
+
+   같으면 값 하나만. 다르면 `기대 → 관측` 으로 나란히 놓고 관측 쪽에 색을 준다. 표를 위에서
+   아래로 훑을 때 눈에 걸려야 하는 것은 '틀린 행'이지 '모든 행의 두 값'이 아니다. */
+.bm-pair { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.bm-pair-arrow { color: var(--bt-fg-3); font-size: var(--bt-xs); }
+.bm-pair-exp { color: var(--bt-fg-3); }
+
+.bm-det {
+  font-family: var(--font-mono); font-size: var(--bt-xs); white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; display: block;
+}
+.bm-det-miss { color: var(--red); }
+.bm-det-exp  { color: var(--bt-fg-3); }
+/* 기대와 관측이 같을 때는 한 줄만 — 두 줄을 쌓으면 행 높이가 두 배가 되고, 1500행 표에서
+   그 두 배는 스크롤 두 배다. */
+.bm-det-same { color: var(--bt-fg-2); }
+
+/* 기대 디텍터는 관측 디텍터 옆에 흐리게 둔다 — 기준은 배경이고 눈이 가야 할 곳은 관측치다. */
+.bm-c-det-exp { color: var(--bt-fg-3); font-size: var(--bt-sm); }
+
+
+/* ── v2 표 ─────────────────────────────────────────────────────────────────────
+   폰트는 pretzel 변수로만 쓴다. 이 화면만 다른 스택을 하드코딩하고 있었는데, 같은 콘솔 안에서
+   표 하나만 글자가 달라 보이면 그 표가 다른 제품처럼 읽힌다. */
+.bm-table { font-family: var(--font-ui); table-layout: fixed; width: 100%; }
+.bm-table th, .bm-table td { overflow: hidden; text-overflow: ellipsis; }
+
+/* 열 너비 조절. table-layout: fixed 위에서 th 를 resize 가능하게 두면 브라우저가 그 폭을
+   그대로 쓴다 — 어느 열을 넓혀 볼지는 무엇을 찾는 중인지에 달렸고, 그건 우리가 정할 수 없다. */
+.bm-table th {
+  resize: horizontal; overflow: auto; min-width: 3.5rem;
+  position: sticky; top: 0; z-index: 1;
+  background: var(--surface); color: var(--bt-fg-2);
+}
+
+/* 대분류는 한 줄로. 두 줄이 되면 행 높이가 들쭉날쭉해져 표를 위에서 아래로 훑을 수 없다.
+   넘치면 자르고, 전체 이름은 title 과 드로어가 들고 있다. */
+.bm-c-cat {
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  max-width: 14rem; line-height: 1.4;
+}
+
+/* 필터 줄. 대분류가 열 개라 한 줄을 통째로 쓰고, 나머지 축(검사 시점·구분·언어·결과)이
+   다음 줄에 나란히 선다. 셋을 한 줄에 밀어 넣으면 카테고리가 두 줄로 접혀 눌러야 할 칩이
+   어디 있는지 매번 찾게 된다. */
+.bm-breaks { display: block; }
+.bm-breaks > .bm-break { margin-bottom: .5rem; }
+.bm-breaks-row2 {
+  display: flex; flex-wrap: wrap; gap: 1.25rem; align-items: flex-start;
+}
+.bm-breaks-row2 > .bm-break { margin-bottom: 0; }
+
+/* 필터 줄 접기 ────────────────────────────────────────────────────────────────
+   칩이 스무 개 남짓이라 펼친 채로는 표가 시작하기 전에 화면 절반이 지나간다. 접는 자리를
+   위쪽 경계선에 두어, 접었을 때 헤더와 표가 곧바로 붙게 한다. */
+.bm-breaks-h {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.bm-breaks-tog {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--bt-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--bt-fg-3);
+}
+.bm-breaks-tog:hover { color: var(--bt-fg); }
+
+/* 삼각형 하나로 방향을 보인다. 펼침이 기본이라 아래를 향하고, 접히면 위를 가리킨다 —
+   "접으면 위로 사라진다"가 화살표와 같은 방향이어야 누르기 전에 결과가 읽힌다. */
+.bm-breaks-chev {
+  width: 0; height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 5px solid currentColor;
+  transition: transform .12s ease;
+}
+.bm-breaks-tog[aria-expanded="false"] .bm-breaks-chev { transform: rotate(-90deg); }
+
+/* 접었을 때 걸려 있는 필터. 요약이 없으면 아무것도 안 걸린 것이다. */
+.bm-breaks-sum {
+  font-size: var(--bt-sm);
+  color: var(--accent);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 접힌 상태. 위 경계선은 .bm-breaks-h 가 이미 그리므로 여기서는 지운다. */
+.bm-breaks.is-shut { display: none; }
+.bm-breaks { margin-top: 12px; padding-top: 0; border-top: 0; }
+
+/* "#" 열 ──────────────────────────────────────────────────────────────────────
+   이 표는 table-layout: fixed 라 첫 행의 th 폭이 곧 열 폭이고, td 에 건 width 는 무시된다.
+   또 fixed 위에서 width 는 "내용만큼"이 아니라 글자 그대로의 폭이라 % 를 쓰면 안 된다 —
+   1% 는 정말 1% 가 되고, 어느 한 열에 100% 를 주면 나머지가 전부 최소폭으로 짜부라진다.
+   줄 번호는 네 자리를 넘지 않는다. 4rem 이면 td 패딩을 빼고도 "1500" 이 들어가고, th 의
+   최소폭(3.5rem)보다 조금 위라 잘리지 않는다. 나머지 열은 브라우저가 균등 배분하고, 더 넓게
+   보고 싶으면 th 를 끌면 된다(위 resize 규칙). */
+.bm-table thead th:first-child { width: 4rem; }
+
+
+/* ── 표·드로어 마감 ────────────────────────────────────────────────────────────
+   위 토큰만 쓰고 개별 규칙에서 크기·색을 새로 만들지 않는다. 여기서 한 번 어기면 다음 사람이
+   따라 어기고, 그렇게 19가지 크기가 다시 쌓인다. */
+.bt-page .bm-table { font-size: var(--bt-sm); color: var(--bt-fg); }
+.bt-page .bm-table th {
+  font-size: var(--bt-xs); font-weight: 600; color: var(--bt-fg-3);
+  text-transform: uppercase; letter-spacing: .04em;
+}
+.bt-page .bm-table td { color: var(--bt-fg); }
+
+/* 코드로 읽어야 하는 칸만 monospace. id 와 디텍터 이름은 문자 하나가 다르면 다른 것을 뜻하고,
+   그 차이는 고정폭에서만 눈에 걸린다. 나머지는 전부 UI 폰트다. */
+.bt-page .bm-c-id code,
+.bt-page .bm-det { font-family: var(--font-mono); font-size: var(--bt-xs); }
+
+.bt-page .bm-c-tech,
+.bt-page .bm-c-no     { color: var(--bt-fg-3); }
+
+
+
+/* ── 레일 접기 ─────────────────────────────────────────────────────────────────
+   목록을 별도 카드로 띄우거나 오버레이로 덮는 대신, 자리에 둔 채 폭만 줄인다.
+   에디터·이슈트래커가 사이드바를 다루는 방식이고, 이 화면에서도 같은 이유로 맞다 —
+   세트/실행을 고르는 일은 표를 보는 일과 번갈아 일어나지, 끝나고 사라지는 단계가 아니다.
+   접힌 자리에 세로 라벨을 남겨 두는 것도 그래서다. 흔적 없이 사라지면 다시 여는 방법을
+   찾아야 한다. */
+.bt-rail { transition: flex-basis .16s ease; }
+.bt-rail-h { gap: 8px; }
+.bt-rail-t { flex: 1 1 auto; }
+
+.bt-rail-x {
+  flex: 0 0 auto; display: grid; place-items: center;
+  width: 20px; height: 20px; padding: 0; cursor: pointer;
+  background: none; border: 1px solid transparent; border-radius: 4px;
+  color: var(--bt-fg-3);
+}
+.bt-rail-x:hover { border-color: var(--border); color: var(--bt-fg); }
+
+/* 쉐브론은 CSS 로 그린다 — 아이콘 폰트를 하나 더 물리면 첫 페인트가 그만큼 늦다. */
+.bt-rail-chev {
+  width: 6px; height: 6px; border-left: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor; transform: rotate(45deg);
+  margin-left: 2px; transition: transform .16s ease;
+}
+
+.bt-rail-stub { display: none; }
+
+/* 접힌 상태 */
+.bt-page.is-rail-shut .bt-rail { flex-basis: 30px; }
+.bt-page.is-rail-shut .bt-rail-h,
+.bt-page.is-rail-shut .bt-rail-list,
+.bt-page.is-rail-shut .bt-rail-empty { display: none; }
+
+.bt-page.is-rail-shut .bt-rail-stub {
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+  padding: 10px 0; cursor: pointer; color: var(--bt-fg-3);
+  min-height: 120px;
+}
+.bt-page.is-rail-shut .bt-rail-stub:hover { color: var(--bt-fg); }
+.bt-page.is-rail-shut .bt-rail-chev { transform: rotate(-135deg); margin: 0; }
+.bt-rail-stub-t {
+  writing-mode: vertical-rl; font-size: var(--bt-xs);
+  text-transform: uppercase; letter-spacing: .1em;
+}
+
+/* ── 드로어 본문 축소 ──────────────────────────────────────────────────────────
+   상세는 원문을 통째로 보는 자리다. 표와 같은 크기로 두면 스크롤이 길어져서 한 케이스를
+   보려고 몇 번을 굴려야 한다. 읽히는 하한까지 내린다. */
+/* Result 상세도 같은 .bm-prompt / .bm-drawer-label 을 쓴다 — 두 화면이 같은 클래스를 공유하니
+   여기 한 곳만 조이면 둘 다 따라온다. 화면마다 규칙을 따로 두면 다음에 한쪽만 바뀐다. */
+
+
+/* ── 케이스 드로어 ─────────────────────────────────────────────────────────────
+   드로어는 <body> 에 직접 붙는다(패널을 매 페인트마다 다시 그리면 트랜지션이 죽어서, 한 번만
+   만들어 두고 .open 을 토글하는 구조다). 그래서 `.bt-page` 로 시작하는 규칙은 드로어에 닿지
+   않는다 — 페이지 안에 있는 것처럼 보여도 DOM 상으로는 형제다.
+
+   본문 크기는 표의 행과 맞춘다. 상세는 원문을 통째로 보는 자리라 표보다 커야 할 이유가 없고,
+   크면 한 케이스를 보려고 스크롤을 몇 번씩 굴리게 된다. */
+.bt-drawer {
+  --bt-xs: 10px; --bt-sm: 11px; --bt-md: 12px;
+  --bt-fg: var(--text); --bt-fg-2: var(--text-secondary); --bt-fg-3: var(--text-muted);
+  font-family: var(--font-ui);
+}
+:root[data-theme="dark"] .bt-drawer { --bt-fg: #ffffff; }
+
+.bt-drawer .bm-drawer-label {
+  margin: 13px 0 5px; font-size: var(--bt-xs); font-weight: 600;
+  color: var(--bt-fg-3); text-transform: uppercase; letter-spacing: .05em;
+}
+.bt-drawer .bm-prompt {
+  padding: 7px 9px; border-radius: 6px;
+  font-family: var(--font-mono); font-size: var(--bt-sm); line-height: 1.55;
+  max-height: 30rem; overflow: auto;
+}
+.bt-drawer .bm-drawer-id { font-family: var(--font-mono); font-size: var(--bt-md); }
+.bt-drawer .bm-drawer-meta dt { font-size: var(--bt-xs); color: var(--bt-fg-3); }
+.bt-drawer .bm-drawer-meta dd { font-size: var(--bt-sm); color: var(--bt-fg); }

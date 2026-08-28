@@ -38,8 +38,13 @@ using json = nlohmann::json;
 namespace
 {
 
+// The daemon sections a commit may address, and the ones GET /api/settings projects for the
+// editors. "pretzel-ai" is in the list without being an IPC daemon: it is a separate service
+// reached over gRPC, but its deployment is operator-declared configuration and belongs in the same
+// versioned document as everything else. What differs is delivery — engined's ConfigApply broadcast
+// cannot reach it, so the new section is pushed to the service over the gRPC edge instead.
 constexpr const char* kSettingsDaemons[] = {
-    "engined", "authd", "probed", "collectord", "topologyd",
+    "engined", "authd", "probed", "collectord", "topologyd", "pretzel-ai",
 };
 
 constexpr const char* kHiddenDomains[] = {
@@ -259,6 +264,183 @@ bool validateApiReferences(const json& values, std::string& error)
     return pz::config::checkApiReferences(effective, error);
 }
 
+// pretzel-ai.route — the deployment matrix (www/js/ai-assistant.js).
+//   { llm: gateway|direct, guardrail: gateway|airs|none, require_guardrail?: bool }
+//
+// Two independent axes. Five of the six combinations are deployments somebody runs; the sixth is
+// refused here for the same reason pretzel-ai refuses it at startup — inspection cannot be
+// delegated to a gateway that is not on the path, and an appliance that accepted it would serve
+// turns nobody checks. Checked against the EFFECTIVE post-commit view (stored, overlaid with what
+// is arriving), because an editor may publish one axis without the other.
+bool validateAiRoute(const json& values, std::string& error)
+{
+    json effective = pz::config::Config::serviceSection("pretzel-ai", "route");
+    if (!effective.is_object())
+        effective = json::object();
+    for (auto it = values.begin(); it != values.end(); ++it)
+        effective[it.key()] = it.value();
+
+    const std::string llm = effective.value("llm", std::string("gateway"));
+    const std::string guardrail = effective.value("guardrail", std::string("gateway"));
+
+    if (llm != "gateway" && llm != "direct")
+    {
+        error = "route.llm must be 'gateway' or 'direct'";
+        return false;
+    }
+    if (guardrail != "gateway" && guardrail != "airs" && guardrail != "none")
+    {
+        error = "route.guardrail must be 'gateway', 'airs' or 'none'";
+        return false;
+    }
+    if (effective.contains("require_guardrail") && !effective["require_guardrail"].is_boolean())
+    {
+        error = "route.require_guardrail must be true or false";
+        return false;
+    }
+    if (guardrail == "gateway" && llm == "direct")
+    {
+        error = "route.guardrail 'gateway' needs route.llm 'gateway' — there is no gateway on this "
+                "path to defer to";
+        return false;
+    }
+    return true;
+}
+
+// No key, token or password may be committed. running_config is append-versioned, rendered verbatim
+// in the review diff and written out by Save-to-file, so a secret written here would be permanent
+// and readable by every reviewer. The AI gateway's own subscription key is held sealed in
+// ai_gateway_credential_state instead; these domains carry only the declaration around it.
+bool rejectSecrets(const json& values, const char* domain, std::string& error)
+{
+    for (const auto* secret : {"api_key", "key", "token", "password", "secret"})
+    {
+        if (!values.contains(secret))
+            continue;
+        error = std::string(domain) + "." + secret + " is a credential and cannot be committed to "
+                "the running configuration";
+        return false;
+    }
+    return true;
+}
+
+// pretzel-ai.gateway — where the completions leg points, and how a turn is shaped. The model
+// catalog is deliberately NOT here: which models exist is a fact about the gateway account, read
+// back over ListModels, not a declaration that could be rolled back like a policy.
+bool validateAiGateway(const json& values, std::string& error)
+{
+    if (!rejectSecrets(values, "gateway", error))
+        return false;
+
+    if (values.contains("port"))
+    {
+        const auto& p = values["port"];
+        if (!p.is_number_integer() || p.get<std::int64_t>() < 1 || p.get<std::int64_t>() > 65535)
+        {
+            error = "gateway.port must be 1-65535";
+            return false;
+        }
+    }
+    if (values.contains("tls") && !values["tls"].is_boolean())
+    {
+        error = "gateway.tls must be true or false";
+        return false;
+    }
+    if (values.contains("path"))
+    {
+        const std::string path = values.value("path", std::string());
+        if (path.empty() || path.front() != '/')
+        {
+            error = "gateway.path must begin with '/'";
+            return false;
+        }
+    }
+    for (const auto* positive : {"max_tokens", "timeout_sec"})
+    {
+        if (!values.contains(positive))
+            continue;
+        const auto& v = values[positive];
+        if (!v.is_number_integer() || v.get<std::int64_t>() < 1)
+        {
+            error = std::string("gateway.") + positive + " must be a positive integer";
+            return false;
+        }
+    }
+    return true;
+}
+
+// pretzel-ai.airs — the scan service, when this appliance owns the verdict. Either profile_name or
+// profile_id identifies the security profile; the scan API takes one of them, and which one is the
+// operator's to choose, so neither is required here on its own.
+bool validateAiAirs(const json& values, std::string& error)
+{
+    if (!rejectSecrets(values, "airs", error))
+        return false;
+
+    if (values.contains("fail_open") && !values["fail_open"].is_boolean())
+    {
+        error = "airs.fail_open must be true or false";
+        return false;
+    }
+    if (values.contains("timeout_sec"))
+    {
+        const auto& v = values["timeout_sec"];
+        if (!v.is_number_integer() || v.get<std::int64_t>() < 1)
+        {
+            error = "airs.timeout_sec must be a positive integer";
+            return false;
+        }
+    }
+    return true;
+}
+
+// pretzel-ai.providers — the direct leg's endpoints, one per provider slug (the part of a model id
+// before the slash). A list rather than an object keyed by slug: a commit merges values into the
+// stored document, and a merged object can only ever gain keys — removing a provider would be
+// unexpressible. An array is replaced wholesale, which is what an editable list needs.
+//   { list: [{ id, url }] }
+bool validateAiProviders(const json& values, std::string& error)
+{
+    if (!rejectSecrets(values, "providers", error))
+        return false;
+    if (!values.contains("list"))
+        return true;
+    if (!values["list"].is_array())
+    {
+        error = "providers.list must be an array";
+        return false;
+    }
+
+    std::size_t idx = 0;
+    for (const auto& p : values["list"])
+    {
+        const std::string at = "providers.list[" + std::to_string(idx++) + "]";
+        if (!p.is_object())
+        {
+            error = at + " is not an object";
+            return false;
+        }
+        if (p.value("id", std::string()).empty())
+        {
+            error = at + " has no provider id";
+            return false;
+        }
+        const std::string url = p.value("url", std::string());
+        if (url.rfind("http://", 0) != 0 && url.rfind("https://", 0) != 0)
+        {
+            error = at + " (\"" + p.value("id", std::string()) + "\") needs an http(s) url";
+            return false;
+        }
+        std::string secretError;
+        if (!rejectSecrets(p, at.c_str(), secretError))
+        {
+            error = secretError;
+            return false;
+        }
+    }
+    return true;
+}
+
 // Shape only: every entry in every array this domain owns is well-formed on its own. Deliberately
 // says nothing about references — those cannot be judged one change at a time, see below.
 bool validateCommitShape(const std::string& daemon, const std::string& domain, const json& values,
@@ -295,6 +477,18 @@ bool validateCommitShape(const std::string& daemon, const std::string& domain, c
     if (daemon == "collectord" && domain == "api")
         return validateArray("api_credentials", validApiKey) && validateArray("endpoints", validApiEndpoint) &&
                validateArray("connectors", validApiConnector);
+
+    if (daemon == "pretzel-ai")
+    {
+        if (domain == "route")
+            return validateAiRoute(values, error);
+        if (domain == "gateway")
+            return validateAiGateway(values, error);
+        if (domain == "airs")
+            return validateAiAirs(values, error);
+        if (domain == "providers")
+            return validateAiProviders(values, error);
+    }
 
     return true;
 }

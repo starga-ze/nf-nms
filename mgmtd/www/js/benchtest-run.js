@@ -331,8 +331,8 @@
           <span class="btr-seq">[${c.seq}/${state.total || '?'}]</span>
           <span class="btr-id">${esc(c.prompt_id)}</span>
           <span class="btr-cause">${esc(c.cause)}</span>
-          <span class="btr-verdict">${esc(c.verdict)}</span>
-          <span class="btr-det">${esc((c.detectors || []).join(',') || '-')}</span>
+          <span class="btr-action">${esc(c.observed_action)}</span>
+          <span class="btr-det">${esc((c.observed_detector || []).join(',') || '-')}</span>
           <span class="btr-ms">${c.latency_ms ? c.latency_ms + 'ms' : ''}</span>
         </div>`;
     }).join('');

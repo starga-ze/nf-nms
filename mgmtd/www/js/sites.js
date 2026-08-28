@@ -13,7 +13,7 @@
   window.NMS = window.NMS || {};
 
   // Read live (not once): settings tabs switch client-side without a page load (see main.js).
-  const activeTab = () => new URLSearchParams(location.search).get('tab') || 'sites';
+  const activeTab = () => new URLSearchParams(location.search).get('tab') || window.NMS.settingsDefaultTab;
   const DRAFT_KEY = 'sites';
 
   const { esc, newUuid } = window.NMS.utils;
