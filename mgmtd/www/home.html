@@ -359,7 +359,7 @@
     function loadConfig() {
       return fetch('/api/settings', { credentials: 'same-origin', headers: { Accept: 'application/json' } })
         .then(function (r) { if (r.status === 401) { location.href = '/'; return null; } return r.ok ? r.json() : Promise.reject(r.status); })
-        .then(function (d) { if (d) siteData = ((d.daemons || {}).engined || {}).site || { sites: [], ngfw_devices: [], sase_devices: [] }; })
+        .then(function (d) { if (d) siteData = ((d.scopes || {}).pretzel || {}).site || { sites: [], ngfw_devices: [], sase_devices: [] }; })
         .catch(function () {});
     }
     function loadAlive() {

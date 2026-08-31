@@ -77,8 +77,8 @@ void StatusController::deviceStatus(MgmtdServiceManager& sm, const pz::http::Htt
         }
 
         // config: which API Key / connector each device carries.
-        const auto& api = pz::config::Config::serviceSection("collectord", "api");
-        const auto& site = pz::config::Config::serviceSection("engined", "site");
+        const auto& api = pz::config::Config::section(pz::config::scope::kPretzel, "connector");
+        const auto& site = pz::config::Config::section(pz::config::scope::kPretzel, "site");
 
         // device oid -> best credential layer across its bound API Keys.
         std::unordered_map<std::string, std::string> credLayer;

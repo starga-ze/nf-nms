@@ -140,6 +140,9 @@ struct GrpcClientHandler::Impl
         case GrpcCmd::ListModels:
             json = client.listModels(error);
             break;
+        case GrpcCmd::ApplyConfig:
+            json = client.applyConfig(task.configJson, error);
+            break;
         case GrpcCmd::CorpusStatus:
             json = client.corpusStatus(error);
             break;

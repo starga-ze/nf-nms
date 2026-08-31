@@ -22,7 +22,7 @@ namespace
 
 const nlohmann::json& bootstrapConfig()
 {
-    return pz::config::Config::serviceSection("collectord", "bootstrap");
+    return pz::config::Config::section(pz::config::scope::kPretzel, "bootstrap");
 }
 
 std::chrono::milliseconds clientHelloInterval()

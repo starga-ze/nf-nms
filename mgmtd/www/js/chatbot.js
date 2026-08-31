@@ -20,7 +20,7 @@
  *
  * Where the answers come from
  * ---------------------------
- * POST /api/chat → mgmtd → inferd → the gateway. The verdicts drawn here are AIRS's own, read out
+ * POST /api/chat → mgmtd → pretzel-ai → the vendor. The verdicts drawn here are AIRS's own, read out
  * of the `hook_results` the gateway returns, so what is on screen is what actually happened rather
  * than what this page believes should have.
  *
@@ -38,8 +38,9 @@
  *            block — mistaking the two is exactly the failure the AIRS lab exists to catch.
  *   uninspected  no hook_results at all: the guardrail is not on this call's path.
  *
- * Conversations live in localStorage: this browser, this machine. There is no server-side thread
- * store, and dropping the history on reload would lose real work.
+ * Conversations live in localStorage: this browser, this machine. Every read and write goes
+ * through `threads` below, which is the seam the server-side store will be dropped into — see the
+ * note on it for what that needs and what is still undecided.
  */
 (function () {
   'use strict';
@@ -47,10 +48,33 @@
   const esc = (s) => window.NMS.utils.esc(s);
   const fmtTs = (v) => window.NMS.utils.fmtTs(v);
 
-  // Threads live in this browser only — there is no server-side thread store. That makes them the
-  // signed-in person's data sitting on a shared appliance console, so the key is registered for
+  // Threads live in this browser only — there is no server-side thread store yet. That makes them
+  // the signed-in person's data sitting on a shared appliance console, so the key is registered for
   // clearing at logout; without that, the next person to sign in on this machine opens the rail
   // and reads the previous one's conversations, scan verdicts and all.
+  //
+  // ── Where this is going ─────────────────────────────────────────────────────────────────────
+  // Threads move to the appliance database, so they survive a browser and follow the person rather
+  // than the machine. The shape that decision already fixed:
+  //
+  //   chat_thread   (oid, owner, service 'chat'|'agent', title, model, created_at, updated_at)
+  //   chat_message  (oid, thread, seq, role, content, model, ok, code, latency_ms, scan, created_at)
+  //
+  // State, not configuration — so it lives beside api_collection rather than in running_config,
+  // engined is the only writer (new IPC Writes), and mgmtd reads for the list and the history.
+  // Visibility is the author's own threads only.
+  //
+  // What is NOT decided, and has to be before any of it is built:
+  //   * what `owner` is. A local login is one row today, but SAML makes it many: a subject id
+  //     breaks every thread when the IdP reissues one, and a username hands the previous holder's
+  //     history to whoever is created with that name next.
+  //   * what happens to a person's threads when their account goes.
+  //   * retention — api_collection prunes bodies on a window; a conversation probably should too.
+  //
+  // Until then: every read and write goes through `threads` below and nothing else touches
+  // localStorage, so the swap is one object rather than a search through this file. The interface
+  // is already async for the same reason — a server-backed store cannot be made synchronous later
+  // without touching every caller.
   const STORE_KEY = 'pz.chat.v1';
   window.NMS.clearOnLogout(STORE_KEY);
   // The mock's own profile name. Deliberately not a plausible-looking real one: an inspector
@@ -68,11 +92,41 @@
   // produce (~30-80/s), so the two are indistinguishable to read.
   //
   // MAX_STREAM_MS is the ceiling: past roughly a thousand characters, holding the base rate would
-  // make the reader wait longer for the end of the answer than the gateway took to produce it, so
+  // make the reader wait longer for the end of the answer than the model took to produce it, so
   // longer answers speed up to land inside it. FRAME_MS is one animation frame.
-  const READ_CPS = 55;
+  //
+  // Two bounds on top of that, because the ceiling alone produced a blur: a 6,000-character answer
+  // divided by 18 seconds is 333 characters a second, which is not reading at any speed.
+  //
+  //   MAX_CPS          the fastest this will ever reveal text. Past it the eye is not following
+  //                    words, it is watching a block fill in, and the animation has stopped doing
+  //                    the one thing it is for.
+  //   HARD_STREAM_MS   and the answer to what that costs. Capping the rate makes a long answer
+  //                    take longer — 6,000 characters at 170/s is 35 seconds, which is its own
+  //                    kind of bad — so after this much time the rest is simply shown. The opening
+  //                    arrives at a readable pace and nobody waits out a minute of typing.
+  // The numbers, and what they are measured against. A character rate is easier to reason about
+  // as words per minute: divide by 5.5 characters a word, multiply by 60.
+  //
+  //   25/s  ≈  270 wpm   reading speed. What a person actually takes it in at.
+  //   50/s  ≈  545 wpm   the fastest this will go, for answers long enough to need it
+  //   170/s ≈ 1850 wpm   what this used to do, which is 6-9x reading speed and read as a flash
+  //
+  // The old ceiling was set against fast READING. The rate that actually looks right is the rate a
+  // model produces at, which is slower — an answer that arrives faster than anything could have
+  // written it does not read as arriving at all.
+  const READ_CPS = 25;
+  const MAX_CPS = 50;
   const MAX_STREAM_MS = 18000;
+  const HARD_STREAM_MS = 15000;
   const FRAME_MS = 16;
+  // How often the DOM is rebuilt while text is arriving. The text advances every frame — that is
+  // the rhythm — but the markdown only has to be re-rendered often enough that nobody sees the
+  // gap, and 110ms is eight times a second.
+  const PAINT_MS = 110;
+  // Above this, formatting waits for the end. The parse is over the whole answer every time, so on
+  // a very long one even eight a second costs more than italics mid-flight are worth.
+  const LIVE_MD_MAX = 8000;
 
   // Model choice belongs to the gateway, not to the app — the app names a model and the gateway
   // decides which provider and key serve it. Each entry is one gateway integration, so switching
@@ -372,74 +426,259 @@
     gateway: 'unknown',// 'unknown' | 'live' | 'mock' | 'error' — what answered the last send
     profile: '',       // the AIRS profile name the gateway last reported
     badges: true,      // inline verdict pills
-    rag: true,         // ground answers in the Prisma Access corpus
-    topK: 5,           // passages to retrieve when it is on
+    mode: 'chat',      // 'chat' | 'agent' — which service the rail is showing
   };
 
-  function load() {
-    try {
-      const raw = JSON.parse(localStorage.getItem(STORE_KEY) || '{}');
-      if (Array.isArray(raw.convos)) state.convos = raw.convos;
-      if (raw.activeId) state.activeId = raw.activeId;
-      if (typeof raw.rag === 'boolean') state.rag = raw.rag;
-      if (Number.isFinite(raw.topK)) state.topK = Math.min(20, Math.max(1, raw.topK));
-      // Not validated here: the catalog has not arrived yet, and dropping a stored choice
-      // against the one-entry fallback would reset every operator to GPT-4o on load.
-      // loadCatalog() checks it once the real list is in.
-      if (raw.model) state.model = raw.model;
-      if (typeof raw.badges === 'boolean') state.badges = raw.badges;
-      if (typeof raw.railOpen === 'boolean') state.railOpen = raw.railOpen;
-    } catch (_) { /* corrupt or absent — start clean */ }
+  // The one place that knows where threads are kept. Everything else calls load()/save() and does
+  // not know, which is what makes the move to the appliance database a change to this object.
+  //
+  // Async on both halves although localStorage is not: a server-backed read is a fetch, and a
+  // caller written against a synchronous read would have to be found and rewritten. Awaiting a
+  // resolved promise costs a microtask.
+  const threads = {
+    async read() {
+      try {
+        return JSON.parse(localStorage.getItem(STORE_KEY) || '{}');
+      } catch (_) { return {}; }   // corrupt or absent — start clean
+    },
+    async write(doc) {
+      try {
+        localStorage.setItem(STORE_KEY, JSON.stringify(doc));
+      } catch (_) { /* quota or private mode — the session still works, it just will not survive */ }
+    },
+    // The cap exists because this store is a browser quota. A server-backed one drops it and prunes
+    // on a retention window instead, the way api_collection does.
+    CAP: 30,
+  };
+
+  async function load() {
+    const raw = await threads.read();
+    if (Array.isArray(raw.convos)) state.convos = raw.convos;
+    // Not validated here: the catalog has not arrived yet, and dropping a stored choice
+    // against the one-entry fallback would reset every operator to the first model on load.
+    // loadCatalog() checks it once the real list is in.
+    if (raw.activeId) state.activeId = raw.activeId;
+    if (raw.model) state.model = raw.model;
+    if (raw.mode === 'chat' || raw.mode === 'agent') state.mode = raw.mode;
+    if (typeof raw.badges === 'boolean') state.badges = raw.badges;
+    if (typeof raw.railOpen === 'boolean') state.railOpen = raw.railOpen;
   }
 
+  // Fire-and-forget by design: a save is never on the path of anything the operator is waiting
+  // for, and awaiting it at every call site would put a round trip inside keystroke handling once
+  // the store is remote.
   function save() {
-    try {
-      // Thirty threads is already more history than anyone scrolls; the cap is what keeps a busy
-      // browser from filling its storage quota and losing the write that matters.
-      const convos = state.convos.slice(0, 30);
-      localStorage.setItem(STORE_KEY, JSON.stringify({
-        convos, activeId: state.activeId, model: state.model,
-        badges: state.badges, railOpen: state.railOpen,
-      }));
-    } catch (_) { /* quota or private mode — the session still works, it just will not survive */ }
+    threads.write({
+      convos: state.convos.slice(0, threads.CAP),
+      // Persisted so a reload can put the operator back where they were. Whether it is USED is
+      // decided at load — see the navigation-type check there.
+      activeId: state.activeId,
+      model: state.model, mode: state.mode,
+      badges: state.badges, railOpen: state.railOpen,
+    });
   }
 
   const activeConvo = () => state.convos.find(c => c.id === state.activeId) || null;
+
+  // The session dialog is opened from several places — the rail's New, and the row menu's Edit —
+  // so its openers cannot live inside wire()'s closure. Assigned there once it is in the DOM.
+  let openNewSession = () => {};
+  let openEditSession = () => {};
+
+  // ── Confirm ────────────────────────────────────────────────────────────────
+  // One dialog, reused. The action is only run from its own button, so an operator who lands here
+  // by mistake leaves by every other route — scrim, Escape, Cancel, the close cross.
+  let confirmRun = null;
+
+  function askConfirm(title, body, label, run) {
+    const el = document.getElementById('chatConfirm');
+    if (!el) return;
+    document.getElementById('cfT').textContent = title;
+    document.getElementById('cfB').textContent = body;
+    document.getElementById('cfGo').textContent = label;
+    confirmRun = run;
+    el.hidden = false;
+    setTimeout(() => document.getElementById('cfGo')?.focus(), 0);
+  }
+
+  function closeConfirm() {
+    confirmRun = null;
+    const el = document.getElementById('chatConfirm');
+    if (el) el.hidden = true;
+  }
+
+  function wireConfirm() {
+    const el = document.getElementById('chatConfirm');
+    if (!el) return;
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-cx]')) return closeConfirm();
+      if (e.target.closest('#cfGo')) {
+        const run = confirmRun;
+        closeConfirm();
+        if (run) run();
+      }
+    });
+    el.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { e.preventDefault(); closeConfirm(); }
+    });
+  }
+
+  // ── Row menu ───────────────────────────────────────────────────────────────
+  // Anchored to the button that opened it, mounted on <body> so the rail's overflow cannot crop
+  // it and so there is one open menu at a time by construction. Edit and Remove are the two things
+  // an operator does to a session that are not "open it" — one of which had no affordance at all
+  // and the other of which was a single unguarded click on a bare icon.
+  let rowMenuFor = '';
+
+  function closeRowMenu() {
+    rowMenuFor = '';
+    document.getElementById('chatRowMenu')?.classList.remove('open');
+  }
+
+  function rowMenuEl() {
+    let el = document.getElementById('chatRowMenu');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'chatRowMenu';
+      el.className = 'chat-rmenu';
+      document.body.appendChild(el);
+      el.addEventListener('click', (e) => {
+        const b = e.target.closest('[data-act]');
+        if (!b) return;
+        const id = rowMenuFor;
+        closeRowMenu();
+        if (b.dataset.act === 'edit') openEditSession(id);
+        else if (b.dataset.act === 'remove') deleteConvo(id);
+        else if (b.dataset.act === 'clear') deleteAllConvos();
+      });
+    }
+    return el;
+  }
+
+  function openListMenu(anchor) {
+    const el = rowMenuEl();
+    rowMenuFor = '*';
+    el.innerHTML = `<button class="chat-rmenu-i is-danger" type="button" data-act="clear">
+        ${IC.trash}<span>Delete all sessions</span></button>`;
+    el.classList.add('open');
+    placeMenu(el, anchor);
+  }
+
+  function placeMenu(el, anchor) {
+    // Below the button, right edges aligned; flipped above only if it would leave the viewport.
+    const r = anchor.getBoundingClientRect();
+    const w = el.offsetWidth, h = el.offsetHeight;
+    const left = Math.min(r.right - w, window.innerWidth - 8 - w);
+    let top = r.bottom + 4;
+    if (top + h > window.innerHeight - 8 && r.top - 4 - h > 8) top = r.top - 4 - h;
+    el.style.left = `${Math.max(8, left) + window.scrollX}px`;
+    el.style.top = `${top + window.scrollY}px`;
+  }
+
+  function openRowMenu(anchor, id) {
+    const el = rowMenuEl();
+    rowMenuFor = id;
+    el.innerHTML = `
+      <button class="chat-rmenu-i" type="button" data-act="edit">${IC.pencil}<span>Edit</span></button>
+      <button class="chat-rmenu-i is-danger" type="button" data-act="remove">${IC.trash}<span>Remove</span></button>`;
+    el.classList.add('open');
+    placeMenu(el, anchor);
+  }
+
+  document.addEventListener('pointerdown', (e) => {
+    if (!rowMenuFor) return;
+    if (e.target.closest('#chatRowMenu') || e.target.closest('[data-menu]')
+        || e.target.closest('#listMenu')) return;
+    closeRowMenu();
+  });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeRowMenu(); });
 
   // A conversation's id is also its AIRS session id: it is sent as session_id on every turn, and
   // pretzel-ai forwards it to the gateway as the scan's tr_id. So it is minted once, here, and
   // never regenerated for the life of the thread — a new id mid-conversation splits one exchange
   // into two unrelated sessions in the AIRS console, which is exactly what "new chat" is for and
   // exactly what must not happen otherwise.
-  function newConvo(makeActive) {
-    const c = { id: randId('cv_', 10), title: '', createdAt: Date.now(), updatedAt: Date.now(), messages: [] };
+  // The model is chosen when the session is created and kept on it, rather than being one global
+  // setting the whole rail shares. What that buys: an old session reads back as the thing that
+  // actually answered it, and switching model to try something else no longer silently rewrites
+  // the history of every other thread. It costs a choice at creation — which is why the composer's
+  // picker still works, and moves this session only.
+  //
+  // `mode` is chat or agent. Carried from the start even though only chat serves turns today,
+  // because a session's mode is not something that can be inferred afterwards.
+  function newConvo(makeActive, model, mode) {
+    const c = {
+      id: randId('cv_', 10), title: '', mode: mode || state.mode,
+      model: model || state.model,
+      createdAt: Date.now(), updatedAt: Date.now(), messages: [],
+    };
     state.convos.unshift(c);
     if (makeActive !== false) state.activeId = c.id;
     return c;
   }
 
+  // What the active session is set to, with the global default behind it for a session stored
+  // before the model moved onto sessions.
+  const convoModel = (c) => (c && c.model) || state.model;
+
   // "New chat" is a security control as much as a UI affordance: it is the only way to start a
   // session AIRS will not correlate with what came before. Reusing the empty thread already open
   // rather than stacking a second one keeps the rail from filling with blank sessions that were
   // never sent — and an unsent thread has no scans behind it, so there is nothing to separate.
-  function startNewChat() {
-    const cur = activeConvo();
-    if (cur && !cur.messages.length) {
-      state.activeId = cur.id;
-    } else {
-      newConvo();
-    }
+  function startNewChat(model) {
+    // Always a new one. This used to reuse an empty thread that was already open, which was right
+    // when New was a bare button and the only thing it could produce was another blank session —
+    // but New now takes a name and a model, so the operator has described the session they want.
+    // Reusing meant the second one they described silently renamed the first.
+    const c = newConvo(true, model);
+
+    state.activeId = c.id;
     state.inspectId = '';
     save();
     renderRail();
     renderThread();
     const input = document.getElementById('chatInput');
     if (input) input.focus();
+    return c;
   }
 
-  function deleteConvo(id) {
+  // Asks first, unless the caller has already asked — which is what lets one dialog cover both
+  // "this session" and "all of them" without putting two in a row.
+  function deleteAllConvos() {
+    const rows = sessionsInMode();
+    if (!rows.length) return;
+    const msgs = rows.reduce((n, c) => n + c.messages.filter(m => m.role === 'user').length, 0);
+    askConfirm(
+      `Delete all ${state.mode === 'agent' ? 'Agent' : 'Chat'} sessions`,
+      `${rows.length} session${rows.length === 1 ? '' : 's'}`
+        + (msgs ? ` and ${msgs} message${msgs === 1 ? '' : 's'}` : '')
+        + ' will be deleted. Sessions are stored in this browser only, so this cannot be undone.',
+      `Delete ${rows.length}`,
+      () => {
+        const ids = new Set(rows.map(c => c.id));
+        state.convos = state.convos.filter(c => !ids.has(c.id));
+        state.activeId = '';
+        state.inspectId = '';
+        save();
+        renderRail(); renderThread();
+      });
+  }
+
+  function deleteConvo(id, skipConfirm) {
     const i = state.convos.findIndex(c => c.id === id);
     if (i < 0) return;
+    const c = state.convos[i];
+    if (!skipConfirm) {
+      const n = c.messages.filter(m => m.role === 'user').length;
+      askConfirm(
+        'Delete session',
+        `${c.title ? `“${c.title}”` : 'This session'} will be deleted`
+          + (n ? ` along with its ${n} message${n === 1 ? '' : 's'}` : '')
+          + '. Sessions are stored in this browser only, so this cannot be undone.',
+        'Delete',
+        () => deleteConvo(id, true));
+      return;
+    }
     state.convos.splice(i, 1);
     // Deleting the open thread has to leave one open. Falling back to the neighbour rather than
     // always minting a fresh conversation avoids burning a session id on a click that was about
@@ -471,28 +710,6 @@
     return null;
   }
 
-  // The open conversation only. A running total across every thread in the browser answers a
-  // question nobody is asking — "how much has this laptop ever sent" — and it moves for reasons
-  // that have nothing to do with what is on screen, so a block from a thread three days ago sits
-  // in the count under a conversation where nothing was blocked. Per conversation the numbers
-  // describe the thing the reader is looking at, and reset when they start a new one.
-  function stats() {
-    let scanned = 0, masked = 0, blocked = 0, flagged = 0, uninspected = 0;
-    const c = activeConvo();
-    for (const m of (c ? c.messages : [])) {
-      if (!m.scan) continue;
-      // A prompt-block card carries the same scan as the user message above it — count the turn
-      // once. A response-block card is the only carrier of ITS scan, so it does count.
-      if (m.kind === 'block' && m.scan.direction === 'prompt') continue;
-      scanned++;
-      if (m.scan.verdict === 'mask') masked++;
-      else if (m.scan.verdict === 'block') blocked++;
-      else if (m.scan.verdict === 'flagged') flagged++;
-      else if (m.scan.verdict === 'uninspected') uninspected++;
-    }
-    return { scanned, masked, blocked, flagged, uninspected };
-  }
-
   // ── Icons ──────────────────────────────────────────────────────────────────
 
   const svg = (inner, w) =>
@@ -502,6 +719,10 @@
   const IC = {
     plus:    svg('<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>'),
     trash:   svg('<polyline points="3 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M10 11v6M14 11v6"/>'),
+    dots:    svg('<circle cx="12" cy="5" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="12" cy="19" r="1.3"/>'),
+    chat:    svg('<path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 9.5 9.5 0 0 1-3.2-.5L3 21l1.7-4.6A8.2 8.2 0 0 1 3.6 11.5 8.4 8.4 0 0 1 12 3.1a8.4 8.4 0 0 1 9 8.4z"/>'),
+    agent:   svg('<path d="M12 2v3"/><rect x="4" y="5" width="16" height="14" rx="4"/><circle cx="9" cy="12" r="1.4"/><circle cx="15" cy="12" r="1.4"/>'),
+    pencil:  svg('<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4z"/>'),
     shield:  svg('<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>'),
     shieldOk: svg('<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15.5 9.5"/>'),
     shieldX: svg('<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><line x1="9.5" y1="9.5" x2="14.5" y2="14.5"/><line x1="14.5" y1="9.5" x2="9.5" y2="14.5"/>'),
@@ -548,6 +769,19 @@
     }
     if (!isFinite(pad) || pad === 0) return String(code);
     return lines.map(l => l.slice(pad)).join('\n');
+  }
+
+  // Markdown that is still being written is markdown with an open delimiter, and the one that does
+  // real damage is the code fence: an unclosed ``` swallows everything after it, so the reader
+  // watches the answer disappear into a code block and come back out when the closing fence
+  // arrives. Closing it for the duration of the render costs one string concat and keeps the text
+  // visible; the real closer arrives a moment later and this stops being needed.
+  //
+  // Only fences. An unclosed ** or _ renders as the literal characters, which is what it is.
+  function closeFences(s) {
+    const src = String(s == null ? '' : s);
+    const open = (src.match(/```/g) || []).length % 2;
+    return open ? src + '\n```' : src;
   }
 
   function renderText(s) {
@@ -763,8 +997,12 @@
                               .includes(q));
   }
 
+  // The picker shows and sets the ACTIVE SESSION's model. `state.model` is only the default the
+  // next new session starts from, so an operator who settles on one model does not re-pick it every
+  // time — but the session is what a turn is actually sent with.
   function currentModel() {
-    return MODELS.find(m => m.id === state.model) || MODELS[0] || FALLBACK_MODELS[0];
+    const want = convoModel(activeConvo());
+    return MODELS.find(m => m.id === want) || MODELS[0] || FALLBACK_MODELS[0];
   }
 
   function pickerTrigger() {
@@ -820,7 +1058,7 @@
       </div>
       ${g.models.map(m => {
         const i = list.indexOf(m);
-        const on = m.id === state.model;
+        const on = m.id === currentModel().id;
         return `
         <div class="mp-opt${on ? ' is-on' : ''}${i === picker.active ? ' is-active' : ''}"
              id="mpOpt${i}" role="option" aria-selected="${on}" data-id="${esc(m.id)}" data-i="${i}">
@@ -896,7 +1134,7 @@
     picker.open = true;
     picker.query = '';
     picker.rows = matchingModels();
-    picker.active = Math.max(0, picker.rows.findIndex(m => m.id === state.model));
+    picker.active = Math.max(0, picker.rows.findIndex(m => m.id === currentModel().id));
     renderPicker();
   }
 
@@ -911,9 +1149,14 @@
 
   function choose(id) {
     if (!id || !MODELS.some(m => m.id === id)) return;
+    const c = activeConvo();
+    if (c) c.model = id;
+    // Also the default for the next new session — changing model here is the ordinary way an
+    // operator says which one they want to be using.
     state.model = id;
     save();
     closePicker(true);
+    renderRail();          // the session's subline carries the model
   }
 
   function movePicker(delta) {
@@ -981,16 +1224,40 @@
       <div class="chat-page">
         <div class="chat-rail${state.railOpen ? '' : ' is-hidden'}" id="chatRail">
           <div class="chat-rail-h">
-            <button class="chat-new" type="button" id="chatNew">${IC.plus}<span>새 대화</span></button>
+            <!-- Mode, not a filter: a session belongs to one of the two and cannot be moved
+                 between them, because what answers a turn is a different thing in each. -->
+            <div class="chat-mode" id="chatMode" role="tablist">
+              <span class="chat-mode-slide" id="chatModeSlide"></span>
+              <button class="chat-mode-b" type="button" role="tab" data-mode="chat">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 9.5 9.5 0 0 1-3.2-.5L3 21l1.7-4.6A8.2 8.2 0 0 1 3.6 11.5 8.4 8.4 0 0 1 12 3.1a8.4 8.4 0 0 1 9 8.4z"/></svg>
+                <span>Chat</span>
+              </button>
+              <button class="chat-mode-b" type="button" role="tab" data-mode="agent">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M12 2v3"/><rect x="4" y="5" width="16" height="14" rx="4"/><circle cx="9" cy="12" r="1.4"/><circle cx="15" cy="12" r="1.4"/></svg>
+                <span>Agent</span>
+              </button>
+            </div>
+            <!-- Split: the button starts a session on the model last used, the caret says which
+                 model to start it on. The fast path stays one click. -->
+            <div class="chat-rail-nav">
+              <!-- Where the page lands, and the way back to it. Common to both modes: it is about
+                   starting work, and neither service owns that. -->
+              <button class="chat-home" type="button" id="chatHome">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M3 10.5 12 3l9 7.5"/><path d="M5.5 9.5V20h13V9.5"/></svg>
+                <span>Home</span>
+              </button>
+              <button class="chat-new" type="button" id="chatNew">${IC.plus}<span>New</span></button>
+            </div>
           </div>
           <div class="chat-rail-list" id="chatList"></div>
-          <div class="chat-rail-f" id="chatStats"></div>
         </div>
         <div class="chat-main">
-          <div class="chat-bar">
-            <!-- Filled by renderPicker() once the catalog is in; see the model-picker section
-                 for why this is not the shared enhanceSelect control. -->
-            <div class="mp" id="modelPicker"></div>
+          <!-- Where you are, stated once. With nothing open that is the mode; inside a session it
+               is the session's name and what answers it. Read-only either way: the model is
+               settled by the first message, and the name is edited from the row menu. -->
+          <div class="chat-head" id="chatHead">
+            <div class="chat-head-txt" id="chatHeadTxt"></div>
+            <div class="chat-head-mp" id="chatHeadMp"><div class="mp" id="modelPicker"></div></div>
           </div>
 
           <div class="chat-thread" id="chatThread"><div class="chat-col" id="chatCol"></div></div>
@@ -1013,9 +1280,45 @@
             </div>
           </div>
         </div>
+      </div>
+
+      <!-- New session. A dialog rather than a rail-width popover because there are four things to
+           say about a session and only one of them is the model: a popover would have made the name
+           the name an afterthought, and the name is the whole reason a list of sessions is still
+           readable a week later. -->
+      <div class="chat-modal" id="chatConfirm" hidden>
+        <div class="chat-modal-scrim" data-cx></div>
+        <div class="chat-modal-card is-narrow" role="alertdialog" aria-modal="true"
+             aria-labelledby="cfT" aria-describedby="cfB">
+          <div class="chat-modal-h">
+            <h2 id="cfT"></h2>
+            <button class="chat-modal-x" type="button" data-cx aria-label="Close">&times;</button>
+          </div>
+          <div class="chat-modal-b"><p class="chat-cf-b" id="cfB"></p></div>
+          <div class="chat-modal-f">
+            <button class="btn-sm" type="button" data-cx>Cancel</button>
+            <button class="btn-sm chat-cf-go" type="button" id="cfGo">Delete</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="chat-modal" id="chatModal" hidden>
+        <div class="chat-modal-scrim" data-close></div>
+        <div class="chat-modal-card" role="dialog" aria-modal="true" aria-labelledby="chatModalT">
+          <div class="chat-modal-h">
+            <h2 id="chatModalT">New session</h2>
+            <button class="chat-modal-x" type="button" data-close aria-label="Close">&times;</button>
+          </div>
+          <div class="chat-modal-b" id="chatModalBody"></div>
+          <div class="chat-modal-f">
+            <button class="btn-sm" type="button" data-close>Cancel</button>
+            <button class="btn-primary btn-sm" type="button" id="chatModalGo">Create</button>
+          </div>
+        </div>
       </div>`;
 
     wire();
+    wireConfirm();
     wirePicker();
     renderPicker();
     renderRail();
@@ -1030,39 +1333,113 @@
   function convoTitle(c) {
     if (c.title) return c.title;
     const first = c.messages.find(m => m.role === 'user');
-    if (!first) return 'New chat';
+    if (!first) return 'New session';
     const t = first.text.replace(/\s+/g, ' ').trim();
     return t.length > 34 ? t.slice(0, 34) + '…' : t;
   }
 
+  // The subline: when it was started, and what answers it. Both are what an operator scans a rail
+  // for — "the one from this morning" and "the one I asked the big model" — and neither can be
+  // recovered from the title, which is usually just the first thing they typed.
+  //
+  // The date is relative for the recent past and absolute beyond it. "3d ago" stops being useful
+  // about the point it stops being this week.
+  function convoWhen(ts) {
+    const d = new Date(ts || 0);
+    if (isNaN(d.getTime())) return '';
+    const days = (Date.now() - d.getTime()) / 86400000;
+    if (days < 1) return window.NMS.utils.relAge(d);
+    if (days < 7) return `${Math.round(days)}d ago`;
+    const p = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  }
+
+  const modelLabel = (id) => {
+    const m = MODELS.find(x => x.id === id) || FALLBACK_MODELS.find(x => x.id === id);
+    return m ? m.label : (id || '').split('/').pop();
+  };
+
+  // A session belongs to the mode it was created in. Filtering rather than mixing keeps the two
+  // services separate in the one place an operator would otherwise conflate them.
+  const sessionsInMode = () => state.convos.filter(c => (c.mode || 'chat') === state.mode);
+
+  // The header always says where you are, and it is the same shape in both states so nothing
+  // shifts when a session opens: a title, then one line under it.
+  //
+  // What that second line holds is the difference. With nothing open it is the model picker — the
+  // model is not yet fixed, and this is the moment to choose it. Inside a session it is what the
+  // session is and what it runs on, stated and not editable: the model is settled the moment the
+  // first message goes out, and a control offering to change it there would be offering to
+  // relabel a thread as having run on something it did not.
+  function renderHead() {
+    const el = document.getElementById('chatHead');
+    const txt = document.getElementById('chatHeadTxt');
+    const mp = document.getElementById('chatHeadMp');
+    if (!el || !txt) return;
+    el.classList.remove('is-empty');
+
+    const c = activeConvo();
+    const agent = state.mode === 'agent';
+    const home = !c || agent;
+
+    // The icon carries the identity and the words say what it is. "Pretzel AI Agent Assistant"
+    // spent four words to distinguish one, and the one that mattered was in the middle; the badge
+    // is the same glyph as the mode switch, so the rail and the header agree at a glance.
+    txt.innerHTML = home
+      ? `<div class="chat-head-id">
+           <span class="chat-head-ic">${agent ? IC.agent : IC.chat}</span>
+           <span class="chat-head-t">${agent ? 'Agent' : 'Chat'} Assistant</span>
+         </div>`
+      : `<div class="chat-head-t">${esc(convoTitle(c))}</div>
+         <div class="chat-head-m">${esc(modelLabel(convoModel(c)))}
+           <span class="chat-head-w">${esc(convoWhen(c.createdAt))}</span></div>`;
+
+    // The wrapper, never the picker itself: renderPicker rewrites #modelPicker's className on
+    // every repaint, so a class set on it survives exactly until the next one.
+    if (mp) mp.hidden = !home;
+    if (home) renderPicker();
+  }
+
   function renderRail() {
+    renderHead();
     const list = document.getElementById('chatList');
     if (!list) return;
 
-    if (!state.convos.length) {
-      list.innerHTML = '';
+    const rows = sessionsInMode();
+
+    // An empty rail says why it is empty. The two reasons are different and must not read the
+    // same: Chat has nowhere to list because nothing has been started, Agent has nowhere to list
+    // because the service does not answer here at all — and a blank column would have an operator
+    // waiting for either one to fill in on its own.
+    if (state.mode === 'agent') {
+      list.innerHTML = '<div class="chat-rail-empty">Agent is not available yet</div>';
+    } else if (!rows.length) {
+      list.innerHTML = '<div class="chat-rail-empty">No sessions yet</div>';
     } else {
-      list.innerHTML = `<div class="chat-rail-sec">Conversations</div>` + state.convos.map(c => {
+      list.innerHTML = `<div class="chat-rail-sec">Sessions
+          <button class="chat-sec-x" type="button" id="listMenu"
+                  aria-haspopup="menu" aria-label="Session list actions">${IC.dots}</button>
+        </div>` + rows.map(c => {
         const flagged = c.messages.some(m => m.scan && m.scan.verdict === 'block');
         return `<div class="chat-convo${c.id === state.activeId ? ' active' : ''}" data-convo="${c.id}">
-          ${flagged ? '<span class="chat-convo-flag" data-tip="A turn in this conversation was blocked"></span>' : ''}
-          <span class="chat-convo-t">${esc(convoTitle(c))}</span>
-          <button class="chat-convo-x" type="button" data-del="${c.id}" aria-label="Delete">${IC.trash}</button>
+          <span class="chat-convo-b">
+            <span class="chat-convo-t">
+              ${flagged ? '<span class="chat-convo-flag" data-tip="A turn in this session was blocked"></span>' : ''}
+              ${esc(convoTitle(c))}
+            </span>
+            <span class="chat-convo-s">${esc(convoWhen(c.createdAt))} · ${esc(modelLabel(convoModel(c)))}</span>
+          </span>
+          <button class="chat-convo-x" type="button" data-menu="${c.id}"
+                  aria-haspopup="menu" aria-label="Session actions">${IC.dots}</button>
         </div>`;
       }).join('');
     }
 
-    // `flagged` and `uninspected` are shown only once they happen, but they are the two numbers that
-    // actually matter: detected-and-forwarded is enforcement being off, and uninspected is the
-    // guardrail not being on the path at all. Both look like a quiet, healthy chat from anywhere else.
-    const s = stats();
-    document.getElementById('chatStats').innerHTML = `
-      <div class="chat-stat-h">이 대화</div>
-      <div class="chat-stat"><b>${s.scanned}</b><span>turns scanned</span></div>
-      ${s.masked ? `<div class="chat-stat is-mask"><b>${s.masked}</b><span>redacted before egress</span></div>` : ''}
-      <div class="chat-stat is-block"><b>${s.blocked}</b><span>blocked</span></div>
-      ${s.flagged ? `<div class="chat-stat is-flag"><b>${s.flagged}</b><span>flagged but sent</span></div>` : ''}
-      ${s.uninspected ? `<div class="chat-stat is-flag"><b>${s.uninspected}</b><span>not inspected</span></div>` : ''}`;
+    const slide = document.getElementById('chatModeSlide');
+    if (slide) slide.style.transform = `translateX(${state.mode === 'agent' ? '100%' : '0'})`;
+    document.querySelectorAll('#chatMode .chat-mode-b').forEach(b =>
+      b.classList.toggle('on', b.dataset.mode === state.mode));
+
   }
 
   function renderGateway() {
@@ -1077,7 +1454,7 @@
     const tips = {
       mock:  'No gateway in the path — replies are generated in this browser, not by a model.',
       error: 'The gateway is configured but the last turn failed. Nothing was mocked over it.',
-      live:  'The last turn was answered by the gateway through inferd.',
+      live:  'The last turn was answered by a model through pretzel-ai.',
     };
     const m = map[state.gateway] || map.unknown;
     el.className = 'chat-pill' + m.cls;
@@ -1187,7 +1564,6 @@
         : '이 내용은 모델로 전달되지 않았습니다.';
       const found = b ? (b.all || [b.cat.label]).join(', ') : 'Policy violation';
       return `<div class="chat-turn is-bot" data-msg="${m.id}">
-        <div class="chat-who">Assistant</div>
         <div class="chat-block">
           <div class="chat-block-ic">${IC.shieldX}</div>
           <div class="chat-block-b">
@@ -1211,7 +1587,6 @@
         ? '<div class="chat-fail-n">검사는 정상 수행됨 — 모델 응답 단계에서 실패</div>'
         : '';
       return `<div class="chat-turn is-bot" data-msg="${m.id}">
-        <div class="chat-who">Assistant</div>
         <div class="chat-fail">
           <div class="chat-fail-ic">${IC.alert}</div>
           <div class="chat-fail-b">
@@ -1224,60 +1599,13 @@
       </div>`;
     }
 
-    // What the corpus returned, before the model saw it. Shown as its own turn rather than
-    // folded into the answer, because a retrieval that missed is the failure worth catching —
-    // and once an answer is on screen it is far too easy to read the passages as confirming it.
-    if (m.kind === 'retrieval') {
-      const hits = m.hits || [];
-      if (!m.ok) {
-        return `<div class="chat-turn is-bot" data-msg="${m.id}">
-          <div class="chat-who">Retrieval</div>
-          <div class="chat-rag is-warn">
-            <div class="chat-rag-h">${IC.book}<span>문서를 찾지 못했습니다</span></div>
-            <div class="chat-rag-d">${esc(m.error || '')} — 모델이 문서 없이 답합니다.</div>
-          </div>
-        </div>`;
-      }
-      const rows = hits.map((h, i) => `
-        <a class="chat-rag-i" href="${esc(h.url)}" target="_blank" rel="noopener">
-          <span class="chat-rag-n">${i + 1}</span>
-          <span class="chat-rag-b">
-            <span class="chat-rag-t">${esc(h.title)}</span>
-            <span class="chat-rag-m">${esc(h.docset || '')}${h.version ? ` · v${esc(h.version)}` : ''} · ${(h.score * 100).toFixed(1)}%</span>
-          </span>
-        </a>`).join('');
-      return `<div class="chat-turn is-bot" data-msg="${m.id}">
-        <div class="chat-who">Retrieval</div>
-        <div class="chat-rag">
-          <div class="chat-rag-h">${IC.book}<span>문서 ${hits.length}건을 찾았습니다</span>
-            <b>${m.took_ms}ms</b></div>
-          <div class="chat-rag-l">${rows || '<div class="chat-rag-d">관련도 기준을 넘은 문서가 없습니다.</div>'}</div>
-        </div>
-        <div class="chat-meta">${time}</div>
-      </div>`;
-    }
-
-    // The handoff, said out loud. Without it the passages and the answer read as one step, and
-    // the operator cannot tell whether what reached the model is what they just looked at.
-    if (m.kind === 'handoff') {
-      return `<div class="chat-turn is-bot" data-msg="${m.id}">
-        <div class="chat-hand">
-          <span class="chat-hand-l"></span>
-          <span class="chat-hand-t">${esc(m.text)}</span>
-          <span class="chat-hand-l"></span>
-        </div>
-      </div>`;
-    }
-
     if (m.kind === 'wait') {
       return `<div class="chat-turn is-bot" data-msg="${m.id}">
-        <div class="chat-who">Assistant</div>
         <div class="chat-bubble"><span class="chat-wait">
           <span class="chat-dots"><i></i><i></i><i></i></span>${esc(m.text)}</span></div>
       </div>`;
     }
 
-    const who = m.role === 'user' ? 'You' : 'Assistant';
     const body = m.typing ? '' : renderText(m.text);
     // Offered only once the text is final. A copy button on a message still streaming in would
     // hand over half an answer, which is worse than no button at all.
@@ -1285,7 +1613,6 @@
       `<button class="chat-copy" type="button" data-copy="${m.id}"
                data-tip="Copy">${IC.copy}<span class="chat-copy-t">복사</span></button>`;
     return `<div class="chat-turn is-${m.role === 'user' ? 'user' : 'bot'}" data-msg="${m.id}">
-      <div class="chat-who">${who}</div>
       <div class="chat-bubble" data-body="${m.id}">${body}</div>
       <div class="chat-meta">${verdictPill(m)}${time}${copy}</div>
     </div>`;
@@ -1312,6 +1639,8 @@
     // bottom; once the first turn lands it drops to its normal place. See .chat-main.is-empty.
     const main = document.querySelector('.chat-main');
     if (main) main.classList.toggle('is-empty', empty);
+
+    renderHead();
 
     if (keepScroll) thread.scrollTop = prevTop;
     else if (pinned || !c || !c.messages.length) scrollToEnd();
@@ -1509,7 +1838,7 @@
   const wait = (ms) => new Promise(r => setTimeout(r, ms));
   const tokensOf = (s) => Math.max(1, Math.round(s.length / 3.1));
 
-  // Post, then poll. The turn is not answered on the POST: mgmtd hands it to inferd and returns a
+  // Post, then poll. The turn is not answered on the POST: mgmtd hands it to pretzel-ai and returns a
   // ticket, because the gateway round trip takes seconds and mgmtd builds its responses on the loop
   // every other daemon's IPC arrives on. Holding the POST open would hold that loop.
   //
@@ -1524,11 +1853,11 @@
     return e;
   }
 
-  // Returns the finished turn document from inferd — ok or not — because the interesting failures
+  // Returns the finished turn document from pretzel-ai — ok or not — because the interesting failures
   // carry a scan too. A blocked prompt and a provider that ran out of credit are both `ok:false`,
   // and both were inspected; only a missing gateway throws, so the mock can take over.
   // The turns already on screen, in the shape pretzel-ai's ChatRequest.history expects. Only the
-  // plain text ones: block cards, enforcement notices and retrieval cards are this console's own
+  // plain text ones: block cards and enforcement notices are this console's own
   // furniture, and replaying them as things the person or the model said would put words in both
   // their mouths. A turn the guardrail denied never reached the model, so the model must not be
   // told it did.
@@ -1539,7 +1868,7 @@
       .map(m => ({ role: m.role, content: String(m.text) }));
   }
 
-  async function askServer(text, model, onRetrieval, history, sessionId, onDelta) {
+  async function askServer(text, model, history, sessionId, onDelta) {
     let res;
     try {
       res = await fetch(CHAT_URL, {
@@ -1547,7 +1876,7 @@
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model, message: text, rag: state.rag, k: state.topK,
+          model, message: text,
           history: history || [],
           // The conversation id doubles as the AIRS session id — pretzel-ai forwards it to the
           // gateway, which passes it to Prisma AIRS as tr_id. Sent per turn because it is what
@@ -1577,11 +1906,6 @@
         if (r.ok) d = await r.json();
       } catch (_) { /* a dropped poll is not a failed turn — the next one asks again */ }
 
-      // The passages land a poll or two before the answer on a grounded turn. Handed over the
-      // moment they arrive: the reader is meant to judge what was retrieved while the model is
-      // still working, not to have it appear retroactively underneath a finished answer.
-      if (d && d.retrieval && onRetrieval) { onRetrieval(d.retrieval); onRetrieval = null; }
-
       // The answer as far as it has been written. Cumulative, so this replaces rather than
       // appends — a dropped poll then costs one beat of latency, where appending would silently
       // lose whatever that poll was carrying and leave a hole mid-sentence.
@@ -1601,7 +1925,7 @@
 
   // ── AIRS verdicts ──────────────────────────────────────────────────────────
   // The gateway's scan, in the shape the inspector already renders. The category ids are AIRS's
-  // own and arrive verbatim from inferd — including ones not listed here, which is the point: a
+  // own and arrive verbatim from pretzel-ai — including ones not listed here, which is the point: a
   // category Palo Alto adds later shows up under a prettified id rather than vanishing.
   const AIRS_LABELS = {
     injection:      'Prompt Injection',
@@ -1617,7 +1941,7 @@
   const labelFor = (id) =>
     AIRS_LABELS[id] || String(id || '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 
-  // inferd's normalised scan → the shape renderTurn/renderInspector consume. Kept as a translation
+  // pretzel-ai's normalised scan → the shape renderTurn/renderInspector consume. Kept as a translation
   // rather than by making the UI speak two dialects: the mock and the gateway then stay renderable
   // by exactly one set of code, and there is one place to look when they disagree.
   function airsScan(scan, direction) {
@@ -1690,7 +2014,7 @@
     // The scan is a step the operator should see happen, not a hidden pause before the answer —
     // this placeholder is what distinguishes "being inspected" from "being thought about".
     const waitMsg = { id: randId('m_', 10), role: 'assistant', kind: 'wait',
-      text: state.rag ? '문서를 검색하는 중' : '게이트웨이에서 검사 중', ts: Date.now() };
+      text: '검사 중', ts: Date.now() };
     c.messages.push(waitMsg);
     renderThread();
     save();
@@ -1708,25 +2032,6 @@
     let streamer = null;
     let streamed = false;   // kept for the catch path below
     try {
-      // Fires once, the moment the passages land — before the model has answered. The wait
-      // bubble is re-pointed rather than removed: the turn is still in flight, just in a
-      // different phase, and dropping it would read as the answer having arrived.
-      const onRetrieval = (r) => {
-        const i = c.messages.indexOf(waitMsg);
-        const cards = [
-          { id: randId('m_', 10), role: 'assistant', kind: 'retrieval', ts: Date.now(),
-            ok: r.ok !== false, hits: r.hits || [], took_ms: r.took_ms || 0, error: r.error || '' },
-          { id: randId('m_', 10), role: 'assistant', kind: 'handoff', ts: Date.now(),
-            text: (r.hits && r.hits.length)
-              ? `위 문서 ${r.hits.length}건을 프롬프트에 넣어 모델에 전달합니다`
-              : '문서 없이 모델에 전달합니다' },
-        ];
-        if (i >= 0) c.messages.splice(i, 0, ...cards); else c.messages.push(...cards);
-        waitMsg.text = '모델이 답변을 작성하는 중';
-        renderThread();
-        save();
-      };
-
       // The answer as it is written. The wait bubble is replaced by a real assistant turn the
       // first time text arrives — from then on the reader is watching the answer appear, which is
       // the point of streaming it. It stays `typing` until the turn resolves, so neither the copy
@@ -1744,7 +2049,7 @@
         streamer.push(soFar);
       };
 
-      turn = await askServer(text, state.model, state.rag ? onRetrieval : null, history, c.id, onDelta);
+      turn = await askServer(text, convoModel(c), history, c.id, onDelta);
 
       // A turn that streamed but did not end with an answer — blocked on the response side, or an
       // upstream error after the first tokens — must not leave its fragment on screen. The branch
@@ -1808,7 +2113,7 @@
 
       const respScan = airsScan(turn.scan, 'response');
       const route = {
-        model: state.model,
+        model: convoModel(c),
         tokensIn: turn.tokens_in | 0,
         tokensOut: turn.tokens_out | 0,
         latencyMs: (turn.latency_ms | 0) || (Date.now() - t0),
@@ -1883,7 +2188,7 @@
       id: randId('m_', 10), role: 'assistant', kind: 'text',
       text: delivered, ts: Date.now(), scan: respScan, typing: true,
       route: {
-        model: state.model,
+        model: convoModel(c),
         tokensIn: tokensOf(outbound), tokensOut: tokensOf(delivered),
         latencyMs: Date.now() - t0, source: 'mock',
       },
@@ -1927,15 +2232,73 @@
     let resolveEnd = null;
     let timer = null;
     let carry = 0;   // fractional characters owed from the previous frame
+    let startedAt = 0;
+    let lastPaint = 0;
+
+    // Reveal on a word boundary, not on the character the budget happened to land on.
+    //
+    // This is the difference between the animation reading as streaming and reading as an
+    // animation, and it matters more than the rate did. A model emits tokens: whole words appear
+    // at once, in bursts, and the eye tracks words. Sliding a cursor through characters at the
+    // same average speed looks like a machine typing, which is why every rate tried here was
+    // either too fast to read or too slow to be plausible.
+    //
+    // Korean and Chinese have no spaces, so the search is bounded — past a short look-ahead the
+    // budget is taken as it is, which for CJK means a few characters at a time. That is what those
+    // scripts look like arriving anyway, since a token there is a syllable or two.
+    const boundary = (s, from) => {
+      if (from >= s.length) return s.length;
+      const limit = Math.min(s.length, from + 10);
+      for (let i = from; i < limit; i++) {
+        if (/\s/.test(s[i])) return i + 1;
+      }
+      return from;
+    };
     const instant = !!(window.matchMedia &&
                        window.matchMedia('(prefers-reduced-motion: reduce)').matches);
 
-    const paint = () => {
+    // While the text is still arriving it is painted as PLAIN TEXT, and the markdown is rendered
+    // once at the end.
+    //
+    // Two reasons, one of which is a bug this fixes. Re-parsing the whole answer every frame is
+    // O(n) work sixty times a second against an n that is still growing: at 6,000 characters with
+    // a few code fences it saturated the main thread for the length of the animation, and the page
+    // stopped responding — which is exactly what a long Gemini answer did. And half-written
+    // markdown renders as damage anyway: an unclosed fence swallows everything after it, so the
+    // reader watches the answer flicker between "code" and "not code" as the delimiter arrives.
+    //
+    // textContent, not innerHTML: no HTML parse per frame, and no way for a partial answer to be
+    // interpreted as markup. The caret is a CSS pseudo-element on .is-streaming rather than an
+    // appended node, so it costs nothing per frame either.
+    const paint = (force) => {
       const el = document.querySelector(`[data-body="${msg.id}"]`);
       if (!el) return;
+
+      const streaming = msg.text.length < full.length || !done;
+
+      // The text advances every frame; the DOM does not have to. Re-parsing the whole answer sixty
+      // times a second is what locked the page, and it was never needed — a repaint every 110ms is
+      // eight a second, which is far finer than the eye resolves and an eighth of the work.
+      const now = Date.now();
+      if (!force && streaming && now - lastPaint < PAINT_MS) return;
+      lastPaint = now;
+
       const pinned = atBottom();
-      el.innerHTML = renderText(msg.text) +
-                     (msg.text.length < full.length || !done ? '<span class="chat-caret"></span>' : '');
+
+      if (streaming && full.length > LIVE_MD_MAX) {
+        // Past this size the parse is heavy enough that eight a second still costs more than the
+        // formatting is worth mid-flight. The markdown lands when the answer does.
+        el.classList.add('is-streaming', 'is-raw');
+        el.textContent = msg.text;
+      } else if (streaming) {
+        el.classList.add('is-streaming');
+        el.classList.remove('is-raw');
+        el.innerHTML = renderText(closeFences(msg.text));
+      } else {
+        el.classList.remove('is-streaming', 'is-raw');
+        el.innerHTML = renderText(msg.text);
+      }
+
       if (pinned) scrollToEnd();
       if (onGrow) onGrow();
     };
@@ -1956,17 +2319,32 @@
         // not transport, and the honest reason to do it is that the alternative is a four-second
         // blank followed by a wall of text.
         // Someone who has asked their system not to animate things gets the answer, not a show.
-        const cps = instant ? Infinity
-                            : Math.max(READ_CPS, full.length / (MAX_STREAM_MS / 1000));
-        carry += cps * (FRAME_MS / 1000);
-        const step = Math.min(backlog, Math.max(1, Math.floor(carry)));
-        carry -= step;
-        msg.text = full.slice(0, msg.text.length + step);
-        paint();
+        if (!startedAt) startedAt = Date.now();
+
+        // Out of time: show the rest. Not a failure — the pacing has already done its job, which
+        // was to let the answer start being read rather than landing as a wall.
+        if (!instant && Date.now() - startedAt >= HARD_STREAM_MS) {
+          msg.text = full;
+          paint(true);
+        } else {
+          const cps = instant ? Infinity
+            : Math.min(MAX_CPS, Math.max(READ_CPS, full.length / (MAX_STREAM_MS / 1000)));
+
+          // Jittered, because a real stream is not metronomic. Without this the bursts land on a
+          // perfectly even beat, which reads as a timer rather than as something being written.
+          carry += cps * (FRAME_MS / 1000) * (0.75 + Math.random() * 0.5);
+          if (carry < 1) { timer = setTimeout(tick, FRAME_MS); return; }
+
+          const budget = Math.floor(carry);
+          carry -= budget;
+          const at = Math.min(full.length, msg.text.length + budget);
+          msg.text = full.slice(0, Math.min(full.length, boundary(full, at)));
+          paint();
+        }
       } else if (done) {
         msg.typing = false;
         timer = null;
-        paint();
+        paint(true);
         if (resolveEnd) { const r = resolveEnd; resolveEnd = null; r(); }
         return;
       }
@@ -1988,7 +2366,7 @@
         done = true;
         if (!timer) timer = setTimeout(tick, 0);
         return new Promise(resolve => {
-          if (!timer && msg.text.length >= full.length) { msg.typing = false; paint(); return resolve(); }
+          if (!timer && msg.text.length >= full.length) { msg.typing = false; paint(true); return resolve(); }
           resolveEnd = resolve;
         });
       },
@@ -2004,11 +2382,19 @@
       const total = msg.text.length;
       const step = Math.max(2, Math.ceil(total / 90));
       let i = 0;
+      // Same rule as streamInto: plain text while it types, markdown once at the end. This path
+      // ran the parser ninety times over the whole answer for the same reason and with the same
+      // result on a long one.
       const tick = () => {
         i = Math.min(total, i + step);
         const pinned = atBottom();
-        el.innerHTML = renderText(msg.text.slice(0, i)) +
-                       (i < total ? '<span class="chat-caret"></span>' : '');
+        if (i < total) {
+          el.classList.add('is-streaming');
+          el.textContent = msg.text.slice(0, i);
+        } else {
+          el.classList.remove('is-streaming');
+          el.innerHTML = renderText(msg.text);
+        }
         if (pinned) scrollToEnd();
         if (i >= total) { msg.typing = false; return resolve(); }
         setTimeout(tick, 16);
@@ -2082,19 +2468,130 @@
       }
     });
 
-    document.getElementById('chatNew').addEventListener('click', () => {
-      if (state.sending) return;   // a turn in flight belongs to the thread that sent it
-      startNewChat();
+    // ── New session dialog ────────────────────────────────────────────────────
+    const modal = document.getElementById('chatModal');
+    const modalBody = document.getElementById('chatModalBody');
+
+    const closeModal = () => { modal.hidden = true; };
+
+    function openDialog(editing) {
+      if (state.sending) return;
+      if (!editing && state.mode !== 'chat') return;
+      const c = editing ? state.convos.find(x => x.id === editing) : null;
+      if (editing && !c) return;
+
+      const list = MODELS.length ? MODELS : FALLBACK_MODELS;
+      document.getElementById('chatModalT').textContent = c ? 'Edit session' : 'New session';
+      document.getElementById('chatModalGo').textContent = c ? 'Save' : 'Create';
+      modalBody.dataset.editing = editing || '';
+      modalBody.innerHTML = `
+        <label class="chat-f">
+          <span class="chat-f-l">Mode</span>
+          <!-- Fixed, and shown rather than hidden: a session belongs to the mode it was created in
+               and cannot be moved, so the dialog states which one this will be instead of letting
+               an operator discover it afterwards. -->
+          <span class="chat-f-fixed">${esc(state.mode === 'agent' ? 'Agent' : 'Chat')}</span>
+        </label>
+        <label class="chat-f">
+          <span class="chat-f-l">Name <em>optional</em></span>
+          <input id="nsName" type="text" maxlength="80" autocomplete="off"
+                 value="${esc(c ? (c.title || '') : '')}"
+                 placeholder="What this session is for"/>
+        </label>
+        ${c ? `
+        <label class="chat-f">
+          <span class="chat-f-l">Model</span>
+          <span class="chat-f-fixed">${esc(modelLabel(convoModel(c)))}</span>
+        </label>
+        <p class="chat-f-note">Changed from the composer, where it applies to the next message —
+          a session is not relabelled after the fact as having run on something it did not.</p>`
+        : `
+        <label class="chat-f">
+          <span class="chat-f-l">Model</span>
+          <select id="nsModel">
+            ${list.map(m => `<option value="${esc(m.id)}"${m.id === state.model ? ' selected' : ''}>${esc(m.label)}</option>`).join('')}
+          </select>
+        </label>
+        <p class="chat-f-note">Kept on the session, so the thread reads back as the one that
+          answered it. Changeable later from the composer.</p>`}`;
+      modal.hidden = false;
+      window.NMS.utils.enhanceSelects(modalBody);
+      setTimeout(() => document.getElementById('nsName')?.focus(), 0);
+    }
+
+    openNewSession = () => openDialog('');
+    openEditSession = (id) => openDialog(id);
+
+    function commitModal() {
+      const name = (document.getElementById('nsName')?.value || '').trim();
+      const editing = modalBody.dataset.editing || '';
+
+      if (editing) {
+        const c = state.convos.find(x => x.id === editing);
+        if (c) c.title = name;
+      } else {
+        const model = document.getElementById('nsModel')?.value || state.model;
+        const c = startNewChat(model);
+        // A name is optional: an unnamed session still titles itself from the first thing typed
+        // into it, which is what the rail did before this dialog existed.
+        if (name) c.title = name;
+        state.model = model;
+      }
+
+      closeModal();
+      renderRail(); renderThread(); renderPicker(); save();
+      if (!editing) document.getElementById('chatInput')?.focus();
+    }
+
+    document.getElementById('chatNew').addEventListener('click', () => openNewSession());
+    document.getElementById('chatModalGo').addEventListener('click', commitModal);
+    modal.addEventListener('click', (e) => { if (e.target.closest('[data-close]')) closeModal(); });
+    modal.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { e.preventDefault(); closeModal(); }
+      if (e.key === 'Enter' && e.target.tagName !== 'TEXTAREA') { e.preventDefault(); commitModal(); }
+    });
+
+    // Mode. Switching carries the operator to that mode's most recent session, or to nothing if it
+    // has none — it never creates one, because an empty session nobody asked for is what fills a
+    // rail with noise.
+    document.getElementById('chatMode').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-mode]');
+      if (!b || state.sending) return;
+      const next = b.dataset.mode;
+      if (next === state.mode) return;
+      closeModal();
+      state.mode = next;
+      const first = sessionsInMode()[0];
+      state.activeId = first ? first.id : '';
+      save();
+      renderRail(); renderThread(); renderPicker();
+    });
+
+    // Home: no session open.
+    document.getElementById('chatHome').addEventListener('click', () => {
+      if (state.sending) return;
+      closeRowMenu();
+      state.activeId = '';
+      state.inspectId = '';
+      save();
+      renderRail(); renderThread();
     });
 
     document.getElementById('chatList').addEventListener('click', (e) => {
       if (state.sending) return;
-      // Delete is checked first: its button sits inside the row, so a click on it is also a click
-      // on the row, and selecting a thread on the way to removing it would repaint twice.
-      const del = e.target.closest('[data-del]');
-      if (del) {
+
+      // The overflow button is inside the row it belongs to, so a click on it is also a click on
+      // the row. Checked first, and stopped, or opening the menu would also open the session.
+      const listBtn = e.target.closest('#listMenu');
+      if (listBtn) {
         e.stopPropagation();
-        deleteConvo(del.dataset.del);
+        openListMenu(listBtn);
+        return;
+      }
+      const menu = e.target.closest('[data-menu]');
+      if (menu) {
+        e.stopPropagation();
+        openRowMenu(menu, menu.dataset.menu);
         return;
       }
       const row = e.target.closest('[data-convo]');
@@ -2102,9 +2599,9 @@
     });
 
     // The topbar's refresh means "repaint from what is stored" here; there is nothing to re-fetch.
-    window.NMS.onRefresh(() => {
+    window.NMS.onRefresh(async () => {
       if (state.sending) return;
-      load();
+      await load();
       renderRail();
       renderThread();
       loadCatalog();
@@ -2113,11 +2610,32 @@
 
   // ── Init ───────────────────────────────────────────────────────────────────
 
-  document.addEventListener('DOMContentLoaded', () => {
-    load();
-    if (!state.convos.length) newConvo();
-    if (!activeConvo()) state.activeId = state.convos[0].id;
+  // A reload is not an arrival. Coming to this page from somewhere else should land on Home — the
+  // page used to mint a session on arrival, which put a blank thread in the rail for every visit
+  // that turned out to be someone looking for an old one. But pressing refresh inside a session is
+  // not leaving it, and dropping the operator back to Home for it loses their place for no reason.
+  //
+  // The browser knows which happened: a reload (or a back/forward restore) reports itself as such,
+  // and everything else is a navigation.
+  function resumedNavigation() {
+    try {
+      const nav = performance.getEntriesByType('navigation')[0];
+      if (nav && nav.type) return nav.type === 'reload' || nav.type === 'back_forward';
+      // Pre-Navigation-Timing-2 browsers.
+      const legacy = performance.navigation && performance.navigation.type;
+      return legacy === 1 || legacy === 2;
+    } catch (_) { return false; }
+  }
+
+  document.addEventListener('DOMContentLoaded', async () => {
+    await load();
+
+    // The stored id is only worth honouring if it still names a session in the mode being shown —
+    // it can outlive the thread it points at (deleted in another tab, or dropped by the cap).
+    const resume = resumedNavigation() && state.convos.some(
+      c => c.id === state.activeId && (c.mode || 'chat') === state.mode);
+    if (!resume) state.activeId = '';
+
     mount();
-    document.getElementById('chatInput').focus();
   });
 }());

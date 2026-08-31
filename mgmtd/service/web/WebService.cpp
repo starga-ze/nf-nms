@@ -165,6 +165,13 @@ WebService::Resolved WebService::resolve(const std::string& method, const std::s
         {"GET",  "/api/connector/keys-state",           
             Match::Exact,  WebRoute::KeysState,          Access::Authenticated, false},
 
+        // The assistant's vendor API keys. Separate from the settings-commit path on purpose:
+        // a key is not configuration, so it is neither versioned nor diffed.
+        {"GET",  "/api/ai/credentials",
+            Match::Exact,  WebRoute::AiCredentials,     Access::Authenticated, false},
+        {"POST", "/api/ai/credential",
+            Match::Exact,  WebRoute::AiCredentialStore, Access::Authenticated, false},
+
         // API collection — the read side of the collector's output.
         {"GET",  "/api/collection/overview",
             Match::Prefix, WebRoute::CollectionOverview, Access::Authenticated, false},
@@ -322,6 +329,9 @@ void WebService::route(MgmtdServiceManager& sm, const Request& req, Response& re
     case WebRoute::TlsProbe:           return m_apiController.tlsProbe(sm, req, resp);
     case WebRoute::ApiTestResult:      return m_apiController.testResult(sm, req, resp);
     case WebRoute::KeysState:          return m_apiController.keysState(sm, req, resp);
+
+    case WebRoute::AiCredentials:      return m_aiController.credentials(sm, req, resp);
+    case WebRoute::AiCredentialStore:  return m_aiController.credentialStore(sm, req, resp);
 
     case WebRoute::CollectionOverview: return m_collectionController.overview(sm, req, resp);
     case WebRoute::CollectionSamples:  return m_collectionController.samples(sm, req, resp);

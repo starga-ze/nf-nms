@@ -17,22 +17,14 @@ ApidCore::ApidCore() : Core("apid")
 
 bool ApidCore::onInit()
 {
-    if (!loadLoggerConfig())
-    {
-        return false;
-    }
-
-    pz::util::Logger::Init(m_loggerConfig.name, m_loggerConfig.file, m_loggerConfig.maxFileSize,
-                           m_loggerConfig.maxFiles);
-
     LOG_INFO("apid: starting up");
 
-    if (!loadIpcConfig() || !loadHttpConfig())
+    if (!loadHttpConfig())
     {
         return false;
     }
 
-    m_ipcClient = std::make_unique<pz::ipc::IpcClient>(m_ipcConfig, pz::ipc::IpcDaemon::Apid);
+    m_ipcClient = std::make_unique<pz::ipc::IpcClient>(ipcConfig(), pz::ipc::IpcDaemon::Apid);
     if (!m_ipcClient->init())
     {
         LOG_WARN("IPC client unavailable — ingest edge runs, reports are not forwarded");
@@ -80,6 +72,10 @@ void ApidCore::onLoop()
 
     while (!stopping())
     {
+        // Every other daemon's loop pumps this; apid's did not, which is why a ConfigApply here
+        // set the reload flag and nothing ever consumed it. The daemon stayed on the version it
+        // booted with and engined waited out the whole reload timeout on it.
+        checkReload();
         m_process->tick();
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
@@ -97,39 +93,22 @@ void ApidCore::onShutdown()
     pz::util::Logger::Shutdown();
 }
 
-bool ApidCore::loadLoggerConfig()
-{
-    const auto& cfg = m_config.json();
-    const auto sys = cfg.value("system", nlohmann::json::object());
-
-    const auto log = sys.value("logger", nlohmann::json::object());
-    m_loggerConfig.name = log.value("name", "pz-apid");
-    m_loggerConfig.file = log.value("file", "/tmp/pz-apid.log");
-    m_loggerConfig.maxFileSize = log.value("max_file_size", 5 * 1024 * 1024);
-    m_loggerConfig.maxFiles = log.value("max_files", 10);
-    return true;
-}
-
-bool ApidCore::loadIpcConfig()
-{
-    const auto& cfg = m_config.json();
-    const auto sys = cfg.value("system", nlohmann::json::object());
-
-    const auto ipc = sys.value("ipc", nlohmann::json::object());
-    m_ipcConfig.socketPath = ipc.value("socket_path", "/run/pretzel/ipcd.sock");
-    m_ipcConfig.maxConnections = ipc.value("max_connections", 128);
-    m_ipcConfig.maxFrameSize = ipc.value("max_frame_size", 1048576);
-    m_ipcConfig.rxBufferSize = ipc.value("rx_buffer_size", 1048576);
-    m_ipcConfig.txBufferSize = ipc.value("tx_buffer_size", 1048576);
-    return true;
-}
-
 bool ApidCore::loadHttpConfig()
 {
-    const auto& cfg = m_config.json();
-    const auto svc = cfg.value("service", nlohmann::json::object());
+    // `api` rather than `http`: the appliance has two listeners, and naming them by protocol left
+    // two domains called the same thing in two daemon sections. This one is the northbound API.
+    const auto& http = pz::config::Config::section(pz::config::scope::kPretzel, "api");
 
-    const auto http = svc.value("http", nlohmann::json::object());
+    // Refused rather than defaulted, for the reason MgmtdCore::loadHttpConfig gives: a listener
+    // bound to a guessed port is an ingest edge that nothing is sending to, reporting itself
+    // healthy. Restart=always retries until engined has seeded the config.
+    if (http.empty())
+    {
+        LOG_ERROR("no 'api' domain in the running configuration — refusing to start rather than "
+                  "binding a guessed address. If engined is still seeding, the restart will pick "
+                  "it up");
+        return false;
+    }
     m_httpConfig.listenAddress = http.value("listen_address", "0.0.0.0");
     m_httpConfig.listenPort = static_cast<std::uint16_t>(http.value("listen_port", 8443));
     m_httpConfig.tlsEnabled = http.value("tls_enabled", false);

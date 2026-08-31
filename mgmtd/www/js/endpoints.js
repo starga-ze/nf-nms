@@ -236,7 +236,7 @@
       if (r.status === 401) { location.href = '/'; return; }
       const d = await r.json();
       window.NMS.draft.checkBase(d.version);
-      const api = ((d.daemons || {}).collectord || {}).api || {};
+      const api = ((d.scopes || {}).pretzel || {}).connector || {};
       deployed = (Array.isArray(api.endpoints) ? api.endpoints : []).map(normalize);
     } catch (_) { deployed = []; }
     const staged = window.NMS.draft.get(DRAFT_KEY, null);
@@ -244,7 +244,7 @@
     refreshPending();
   }
 
-  const commitPayload = () => [{ daemon: 'collectord', domain: 'api', values: { endpoints: state.endpoints } }];
+  const commitPayload = () => [{ scope: 'pretzel', domain: 'connector', values: { endpoints: state.endpoints } }];
 
   window.NMS.staging.register({
     key: DRAFT_KEY,

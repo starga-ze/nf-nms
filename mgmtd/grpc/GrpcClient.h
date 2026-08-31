@@ -12,7 +12,7 @@ namespace pz::mgmtd
 {
 
 // The mgmtd-side client for the pretzel-ai inference service — the gRPC replacement for the
-// old IPC ChatRequest/ChatResponse path to inferd. A chat turn streams back chunk by chunk;
+// IPC ChatRequest/ChatResponse path this appliance used while inference was a daemon of its own. A chat turn streams back chunk by chunk;
 // on_delta is invoked for each piece of text as it arrives, which is what lets the console
 // render the answer as it is produced rather than after it is complete.
 //
@@ -52,6 +52,16 @@ public:
                  const std::string& sessionId,
                  const std::string& transactionId,
                  const std::function<void(const std::string&)>& on_delta);
+
+    // Push the assistant's deployment. `configJson` is the document AiConfig assembled — the
+    // running-config section with each enabled vendor's key unsealed into it — and its keys are
+    // the proto's own field names, so it is parsed straight into the request rather than walked
+    // field by field here. A schema that gains a key therefore reaches the service without a
+    // change in this file.
+    //
+    // Returns the server's acknowledgement as JSON; `error` is set for a transport failure or for
+    // a document the service refused.
+    std::string applyConfig(const std::string& configJson, std::string& error);
 
     // The models this appliance may ask for, as {models:[{id,label,provider}], default_model}.
     // Served straight through like the corpus calls: mgmtd has no opinion about the catalog, so a

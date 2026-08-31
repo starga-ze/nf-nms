@@ -42,7 +42,7 @@ public:
 private:
     void onServerHello(MgmtdServiceManager& serviceManager, const pz::ipc::IpcMessage& msg);
 
-    void onRuntimeStart(const pz::ipc::IpcMessage& msg);
+    void onRuntimeStart(MgmtdServiceManager& serviceManager, const pz::ipc::IpcMessage& msg);
 
     // Success and failure both arrive as ConfigReloadResponse; this is where they are told apart.
     void onConfigReloadResponse(MgmtdServiceManager& serviceManager, const pz::ipc::IpcMessage& msg);

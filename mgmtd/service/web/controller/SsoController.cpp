@@ -163,10 +163,9 @@ std::string ssoHtmlAttr(const std::string& s)
     return out;
 }
 
-nlohmann::json ssoAuthConfig()
+const nlohmann::json& ssoAuthConfig()
 {
-    const auto& root = pz::config::Config::daemonConfig("authd");
-    return root.value("service", nlohmann::json::object()).value("auth", nlohmann::json::object());
+    return pz::config::Config::section(pz::config::scope::kPretzel, "auth");
 }
 
 }

@@ -85,19 +85,19 @@
   // One definition drives both navigation levels: the sidebar flyout lists the groups, and the
   // topbar shows the tabs of whichever group is open. Grouped by what the operator is working
   // on rather than by data type —
-  //   AI Assistant       who answers a turn and who inspects it (the pretzel-ai deployment)
+  //   AI Provider        which vendors serve a turn, and how it is shaped (the pretzel-ai deployment)
   //   Site Management    where things are, and what is there (a Site is one customer)
   //   API Profile        the reusable definitions a connector references
   //   API Connector      binding a device + credential + endpoints on a schedule
   //   System Management  this appliance, not the managed estate
   // A group with a single tab renders no tab row; its name in the sidebar is the whole story.
   //
-  // AI Assistant sits first because it is the only group that configures a security boundary:
-  // every other group describes the estate being managed, this one decides whether the turns
-  // this appliance serves are inspected at all, and by whom.
+  // AI Provider sits first because it is the only group that configures this appliance's own
+  // outbound behaviour: every other group describes the estate being managed, this one decides
+  // who the appliance itself talks to on the operator's behalf.
   const SETTINGS_GROUPS = [
-    { id: 'ai-assistant', label: 'AI Assistant', tabs: [
-        { id: 'ai-assistant', label: 'AI Assistant' } ] },
+    { id: 'ai-provider', label: 'AI Provider', tabs: [
+        { id: 'ai-provider', label: 'AI Provider' } ] },
     { id: 'site-management', label: 'Site Management', tabs: [
         { id: 'sites',        label: 'Sites'        },
         { id: 'devices',      label: 'Devices'      } ] },
@@ -223,7 +223,9 @@
   // page gets the same fixed header band (injected into #pageTopbar by buildTopbar).
   const PAGES = {
     'home':            { title: 'Home' },
-    'chatbot':         { title: 'Assistant' },
+    // The assistant stages nothing and has nothing to re-fetch on demand, so it carries neither
+    // control. Its own header lives inside the page, where the session is.
+    'chatbot':         { title: 'Assistant', bareTopbar: true },
     // Two tabs, plain navigation like the audit page: Test browses the set and launches a run,
     // Result reads runs that already happened. A run's result has to outlive the window it was
     // watched in — the modal is a view of a run in flight, not the only place its numbers exist.
@@ -276,6 +278,14 @@
     // closes and nothing on screen says which part of Configuration this is.
     const heading = activeGroup ? activeGroup.label : cfg.title;
     document.title = 'Pretzel — ' + heading;
+
+    // The whole band, not just its buttons. Publish and Refresh are the configuration workflow's
+    // controls — stage, review, commit, re-read — and a page that stages nothing has no use for
+    // either; an always-disabled Publish is chrome that teaches the operator to stop looking at
+    // the button, which is the one thing it must never become. The title goes with them: the
+    // sidebar already says which page this is, and a chat surface wants the height more than it
+    // wants to be told its own name.
+    if (PAGES[page] && PAGES[page].bareTopbar) { el.remove(); return; }
 
     let html = `
       <div class="topbar-main">
@@ -539,6 +549,16 @@
 
   const COLLAPSED_KEY = 'sidebarCollapsed';
 
+  // Pages that carry a list of their own down the left and therefore want the icon rail: two
+  // full-width lists side by side is the layout the icon rail exists to avoid. Named here rather
+  // than declared by each page so the OUTGOING animation can know it too — the rail folds on the
+  // way out, before the navigation, instead of the next document appearing with a different
+  // geometry. (Those pages still stamp html.sb-init-collapsed pre-paint for a direct load or a
+  // refresh, where there is no click to animate.)
+  const RAIL_COLLAPSED_PAGES = new Set(['chatbot']);
+  const pageOf = (href) => String(href || '').split('?')[0].split('/').pop();
+  const wantsIconRail = (page) => RAIL_COLLAPSED_PAGES.has(page || '');
+
   function initSidebar() {
     const sidebar       = document.getElementById('sidebar');
     const overlay       = document.getElementById('sidebarOverlay');
@@ -560,7 +580,10 @@
       sidebar.classList.remove('collapsed');
       if (railToggle) railToggle.style.display = 'flex';
     } else {
-      applyCollapsed(localStorage.getItem(COLLAPSED_KEY) === 'true');
+      // The page's own wish overrides the saved preference for the INITIAL state only: the toggle
+      // still works here, and every other page opens the way the operator left it.
+      applyCollapsed(wantsIconRail(location.pathname.split('/').pop())
+                     || localStorage.getItem(COLLAPSED_KEY) === 'true');
     }
 
     // The pre-paint width is now owned by the .collapsed class (applied above); drop
@@ -573,6 +596,40 @@
       const next = !isCollapsed();
       applyCollapsed(next);
       localStorage.setItem(COLLAPSED_KEY, String(next));
+    });
+
+    // Fold on the way out, then navigate. Without this the rail is wide in the document being
+    // left and narrow in the one being loaded, and the change reads as the page jumping rather
+    // than as the rail closing — the two frames belong to different documents, so nothing ties
+    // them together except doing the visible part before the load starts.
+    //
+    // The wait is bounded by a timer as well as by transitionend: a browser that skips the
+    // transition (reduced motion, a background tab) fires no event, and a navigation that never
+    // happened is a far worse failure than one that was not animated.
+    // On `document`, not on the sidebar: the flyout groups are mounted on <body>, so a future
+    // entry that lives in one would otherwise navigate without the fold. The guard below is narrow
+    // enough that this cannot collide with the flyout's own same-page tab switching — it only
+    // fires for a link whose target page wants the icon rail, and no tab switch does.
+    document.addEventListener('click', (e) => {
+      const link = e.target.closest('a.nav-item[href], a.nav-flyout-item[href]');
+      if (!link || isMobile() || e.defaultPrevented) return;
+      if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+
+      const href = link.getAttribute('href');
+      if (!href || href === '#') return;
+      if (!wantsIconRail(pageOf(href)) || isCollapsed()) return;
+
+      e.preventDefault();
+      applyCollapsed(true);
+
+      let gone = false;
+      const go = () => { if (!gone) { gone = true; location.href = href; } };
+      sidebar.addEventListener('transitionend', function once(ev) {
+        if (ev.propertyName !== 'width') return;
+        sidebar.removeEventListener('transitionend', once);
+        go();
+      });
+      setTimeout(go, 400);
     });
 
     function openMobile()  { sidebar.classList.add('mobile-open'); overlay?.classList.add('visible'); if (railToggle) railToggle.style.display = 'none'; }

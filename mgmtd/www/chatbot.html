@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="css/chatbot.css" />
   <!-- Pre-paint: stamp the theme (and the collapsed rail) on <html> before the first frame, so the
        page never flashes the wrong palette on its way to the right one. -->
-  <script>try{var t=localStorage.getItem('theme');if(t!=='dark'&&t!=='light')t=(window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light';document.documentElement.setAttribute('data-theme',t);if(localStorage.getItem('sidebarCollapsed')==='true')document.documentElement.classList.add('sb-init-collapsed')}catch(e){}</script>
+  <script>try{var t=localStorage.getItem('theme');if(t!=='dark'&&t!=='light')t=(window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light';document.documentElement.setAttribute('data-theme',t);document.documentElement.classList.add('sb-init-collapsed')}catch(e){}</script>
 </head>
 <body class="page-chatbot">
 <div class="app-shell" id="appShell">

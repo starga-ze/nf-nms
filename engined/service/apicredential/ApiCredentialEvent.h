@@ -15,10 +15,10 @@ enum class ApiCredentialEventType : std::uint32_t
     ReceiveStateUpdate = 1,
     ReceiveStateRequest = 2,
     ReceiveSaseApiKey = 3,
-    // The AI gateway client credential, sealed by inferd. Same concern as the three above — a
+    // The assistant's vendor API key, sealed by mgmtd. Same concern as the three above — a
     // secret that arrives already encrypted and lands in a table rather than running_config — so
     // it rides this service instead of earning one of its own.
-    ReceiveGatewayCredential = 4,
+    ReceiveAiCredential = 4,
 };
 
 class ApiCredentialEvent final : public EnginedEvent

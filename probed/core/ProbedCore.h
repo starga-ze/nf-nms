@@ -33,8 +33,6 @@ protected:
     void onShutdown() override;
 
 private:
-    pz::config::LoggerConfig m_loggerConfig;
-    pz::config::IpcConfig m_ipcConfig;
 
     std::unique_ptr<pz::util::ThreadManager> m_threadManager;
     std::unique_ptr<pz::ipc::IpcClient> m_ipcClient;

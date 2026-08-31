@@ -440,9 +440,9 @@ def provision_rag_database():
     CREATE EXTENSION runs as the postgres superuser because pgvector is not a trusted
     extension: the pretzel role cannot enable it itself.
     """
-    # The corpus DB name is the fixed default now that inferd (which used to own the
-    # retrieval config this was read from) is gone. Retrieval is not yet ported to
-    # pretzel-ai, so this provisions an empty substrate for a future consumer.
+    # A fixed default: the daemon that used to own the retrieval config this was read from
+    # is gone, and retrieval is not yet ported to pretzel-ai, so this provisions an empty
+    # substrate for a future consumer.
     db = PG_RAG_DB_NAME
 
     if _pg_row_exists(f"SELECT 1 FROM pg_database WHERE datname='{db}'"):
@@ -469,9 +469,9 @@ def install_rag_store():
     """pgvector + the empty corpus database.
 
     Failure is a warning, never fatal — the same policy install_test_deps() follows. Nine
-    daemons and the whole web console do not touch this: without a corpus, inferd reports
-    retrieval as unavailable and answers every turn ungrounded, which is a running appliance
-    with one feature degraded rather than a failed install.
+    daemons and the whole web console do not touch this: without a corpus, the assistant
+    reports retrieval as unavailable and answers every turn ungrounded, which is a running
+    appliance with one feature degraded rather than a failed install.
     """
     try:
         if not install_pgvector():

@@ -23,6 +23,11 @@ enum class GrpcCmd : std::uint16_t
     // socket also lives on, so a controller that blocked on the stub would stall every other
     // request for the length of the round trip.
     ListModels = 19,
+    // The deployment, pushed the other way. The only command here that is not a question: mgmtd
+    // states what the assistant is configured to be, and the reply is an acknowledgement, not an
+    // answer. It still travels the ticketless path every fire-and-forget call does — nobody is
+    // holding a progress bar open on it, and a failure belongs in the log rather than on a screen.
+    ApplyConfig = 20,
 
     // ── The tech-doc knowledge base ──
     CorpusStatus = 3,    // what the store holds now

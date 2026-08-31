@@ -1,21 +1,22 @@
 #!/usr/bin/env python3
-"""pretzel-package — 컴파일된 데몬을 prod 호스트에 설치한다.
+"""pretzel-package — install the compiled daemons on a production host.
 
     sudo ./pretzel-package install
 
-패키지 안에서 단독으로 돈다 — prod 에는 저장소가 없다.
+This file runs standalone from inside the package — a production host has no repository.
 
-C++ 산출물은 gRPC·protobuf·boost·spdlog 를 정적 링크하고 있어서, 남는 동적 의존성은 배포판이
-주는 것뿐이다(libpq·libssl·libstdc++ 등). 그래서 '바이너리만 옮기면 되는' 것이 맞고, 다만
-같은 배포판·같은 메이저 버전이어야 한다. 설치 전에 ldd 로 실제 확인한다.
+The C++ binaries link gRPC, protobuf, boost and spdlog statically, so the only dynamic
+dependencies left are the ones the distribution provides (libpq, libssl, libstdc++ and friends).
+That is why copying the binaries is enough, provided the distribution and its major version
+match. The installer confirms this with ldd rather than assuming it.
 
-설치하지 않는 것 — 일부러다:
-    /etc/pretzel/credentials.key   장치 API 키를 DB 에 넣기 전 암호화하는 키. 호스트마다
-                                   달라야 하고, 패키지에 담기면 그 순간 공용 비밀이 된다.
-    /etc/pretzel/cert/             TLS 인증서. 호스트 이름에 묶인다.
-    /etc/pretzel/db.env            DB 접속 정보.
-    PostgreSQL                     별도 설치·초기화 대상.
-이것들은 설치 전에 있어야 하고, 없으면 무엇이 없는지 정확히 알려주고 멈춘다.
+What it deliberately does not install:
+    /etc/pretzel/credentials.key   encrypts device API keys before they reach the database. It
+                                   must differ per host; shipping it would make it a shared secret.
+    /etc/pretzel/cert/             TLS certificates, tied to the hostname.
+    /etc/pretzel/db.env            database connection details.
+    PostgreSQL                     installed and initialised separately.
+These must exist beforehand. If any is missing the installer says exactly which and stops.
 """
 
 import argparse
@@ -35,12 +36,12 @@ MGMTD_WWW_INSTALL_DIR = os.path.join(SHARE_INSTALL_DIR, "mgmtd", "www")
 SYSTEMD_DIR = "/etc/systemd/system"
 ETC_ROOT_DIR = "/etc/pretzel"
 
-# 설치기가 만들 수 없는 것들. 여기 없는 항목이 하나라도 있으면 서비스는 뜨더라도 제 일을
-# 하지 못한다 — 조용히 반쯤 도는 것보다 멈추고 알려주는 편이 낫다.
+# Things this installer cannot create. If any is missing the services would start but not do
+# their job — better to stop and say so than to run half-working.
 PREREQ = (
-    (os.path.join(ETC_ROOT_DIR, "credentials.key"), "장치 API 키 암호화 키"),
-    (os.path.join(ETC_ROOT_DIR, "cert"), "TLS 인증서 디렉터리"),
-    (os.path.join(ETC_ROOT_DIR, "db.env"), "DB 접속 정보"),
+    (os.path.join(ETC_ROOT_DIR, "credentials.key"), "device API key encryption key"),
+    (os.path.join(ETC_ROOT_DIR, "cert"), "TLS certificate directory"),
+    (os.path.join(ETC_ROOT_DIR, "db.env"), "database connection details"),
 )
 
 
@@ -61,7 +62,7 @@ def run_cmd(cmd, msg=None, check=True):
         say(msg)
     r = subprocess.run(cmd)
     if check and r.returncode != 0:
-        die(f"명령 실패: {' '.join(cmd)}")
+        die(f"Command failed: {' '.join(cmd)}")
     return r.returncode
 
 
@@ -83,27 +84,27 @@ def _os_id():
     return f"{out.get('ID','?')} {out.get('VERSION_ID','?')}"
 
 
-# ── 사전 점검 ────────────────────────────────────────────────────────────────────────────────
+# ── Preflight ────────────────────────────────────────────────────────────────────────────────
 
 def preflight(mf):
     if os.geteuid() != 0:
-        die("root 권한이 필요하다.", "sudo ./pretzel-package install")
+        die("Root privileges are required.", "sudo ./pretzel-package install")
 
     here = _os_id()
     built = mf.get("os", "")
     if built and here != built:
-        die(f"OS 불일치: 패키지는 '{built}', 이 호스트는 '{here}'.",
-            "정적 링크가 아닌 나머지 의존성(libpq·libssl 등)이 배포판 버전에 묶여 있다.\n"
-            "같은 OS 에서 다시 패키징할 것.")
-    say(f"OS 확인: {here}")
+        die(f"OS mismatch: the package was built on '{built}', this host is '{here}'.",
+            "The dependencies that are not statically linked (libpq, libssl and so on) are tied\n"
+            "to the distribution version. Rebuild the package on a matching host.")
+    say(f"OS: {here}")
 
     arch = mf.get("arch", "")
     if arch and arch != os.uname().machine:
-        die(f"아키텍처 불일치: 패키지 {arch}, 호스트 {os.uname().machine}.")
+        die(f"Architecture mismatch: package {arch}, host {os.uname().machine}.")
 
 
 def check_linkage():
-    """ldd 로 실제 확인한다. '같은 OS 니까 되겠지' 와 '해보니 된다' 는 다르다."""
+    """Confirm with ldd. "same OS so it should work" and "it does work" are different claims."""
     bindir = os.path.join(HERE, "bin")
     missing = {}
     for name in sorted(os.listdir(bindir)):
@@ -116,12 +117,12 @@ def check_linkage():
             missing[name] = gone
     if missing:
         libs = sorted({l for v in missing.values() for l in v})
-        die("공유 라이브러리가 없어 실행할 수 없다:\n        " +
+        die("Shared libraries are missing, so the binaries cannot run:\n        " +
             "\n        ".join(f"{k}: {', '.join(v)}" for k, v in missing.items()),
-            "대부분 libpq5 하나로 해결된다:\n"
+            "Usually libpq5 alone covers it:\n"
             "  sudo apt-get install -y libpq5\n"
-            f"필요한 것: {', '.join(libs)}")
-    say(f"동적 링크 확인: {len(os.listdir(bindir))}개 바이너리 모두 해결됨")
+            f"Needed: {', '.join(libs)}")
+    say(f"Dynamic linkage: all {len(os.listdir(bindir))} binaries resolve")
 
 
 def check_prereq():
@@ -129,15 +130,15 @@ def check_prereq():
     pg = subprocess.run(["systemctl", "is-active", "--quiet", "postgresql"],
                         check=False).returncode == 0
     if not missing and pg:
-        say("사전 요건 확인: /etc/pretzel 자산, PostgreSQL 정상")
+        say("Prerequisites: /etc/pretzel assets present, PostgreSQL running")
         return True
 
     print()
-    say("사전 요건이 갖춰지지 않았다. 바이너리는 설치하되 서비스는 띄우지 않는다:")
+    say("Prerequisites are not in place. Files will be installed but no service will be started:")
     for p, d in missing:
-        print(f"      없음: {p}  ({d})")
+        print(f"      missing: {p}  ({d})")
     if not pg:
-        print("      PostgreSQL 이 돌고 있지 않다  (sudo systemctl start postgresql)")
+        print("      PostgreSQL is not running  (sudo systemctl start postgresql)")
     print()
     return False
 
@@ -147,21 +148,21 @@ def verify_files(mf):
     for rel, want in mf.get("files", {}).items():
         p = os.path.join(HERE, rel)
         if not os.path.isfile(p):
-            bad.append(f"{rel} (없음)")
+            bad.append(f"{rel} (missing)")
             continue
         h = hashlib.sha256()
         with open(p, "rb") as f:
             for chunk in iter(lambda: f.read(1 << 20), b""):
                 h.update(chunk)
         if h.hexdigest() != want:
-            bad.append(f"{rel} (해시 불일치)")
+            bad.append(f"{rel} (checksum mismatch)")
     if bad:
-        die("패키지 무결성 검사 실패:\n        " + "\n        ".join(bad[:10]),
-            "전송이 잘렸을 수 있다. tar 를 다시 옮길 것.")
-    say(f"무결성 확인: {len(mf.get('files', {}))}개 파일")
+        die("Package integrity check failed:\n        " + "\n        ".join(bad[:10]),
+            "The transfer may have been truncated. Copy the tarball across again.")
+    say(f"Integrity: {len(mf.get('files', {}))} files verified")
 
 
-# ── 설치 ─────────────────────────────────────────────────────────────────────────────────────
+# ── Install ──────────────────────────────────────────────────────────────────────────────────
 
 def units_in_package():
     d = os.path.join(HERE, "service")
@@ -169,12 +170,12 @@ def units_in_package():
 
 
 def stop_services(units):
-    """복사 전에 내린다. 실행 중인 바이너리를 덮어쓰면 ETXTBSY 가 나거나, 더 나쁘게는
-    반쯤 쓰인 파일을 다음 재시작이 집는다."""
+    """Bring them down before copying. Overwriting a running binary either fails with ETXTBSY or,
+    worse, leaves a half-written file for the next restart to pick up."""
     names = [u for u in units if u.endswith(".service")]
     if names:
         subprocess.run(["systemctl", "stop"] + names, check=False)
-        say(f"서비스 정지: {len(names)}개")
+        say(f"Stopped {len(names)} services")
 
 
 def install_binaries():
@@ -185,19 +186,20 @@ def install_binaries():
         shutil.copy2(os.path.join(src, name), os.path.join(INSTALL_BIN_DIR, name))
         os.chmod(os.path.join(INSTALL_BIN_DIR, name), 0o755)
         n += 1
-    say(f"바이너리 {n}개 → {INSTALL_BIN_DIR}")
+    say(f"{n} binaries -> {INSTALL_BIN_DIR}")
 
 
 def install_www():
     src = os.path.join(HERE, "share", "mgmtd", "www")
     if not os.path.isdir(src):
         return
-    # 통째로 갈아끼운다. 예전 판의 js 가 남아 캐시에서 섞이면 증상이 재현되지 않는 버그가 된다.
+    # Replace wholesale. A stale js file left behind mixes with the new one through the browser
+    # cache and produces bugs that will not reproduce.
     if os.path.isdir(MGMTD_WWW_INSTALL_DIR):
         shutil.rmtree(MGMTD_WWW_INSTALL_DIR)
     shutil.copytree(src, MGMTD_WWW_INSTALL_DIR)
     n = sum(len(f) for _, _, f in os.walk(MGMTD_WWW_INSTALL_DIR))
-    say(f"웹 콘솔 {n}개 파일 → {MGMTD_WWW_INSTALL_DIR}")
+    say(f"{n} web console files -> {MGMTD_WWW_INSTALL_DIR}")
 
 
 def install_units(units):
@@ -205,7 +207,7 @@ def install_units(units):
     for name in units:
         shutil.copy2(os.path.join(src, name), os.path.join(SYSTEMD_DIR, name))
         os.chmod(os.path.join(SYSTEMD_DIR, name), 0o644)
-    say(f"systemd 유닛 {len(units)}개 → {SYSTEMD_DIR}")
+    say(f"{len(units)} systemd units -> {SYSTEMD_DIR}")
 
 
 def start_services(units):
@@ -213,22 +215,22 @@ def start_services(units):
     target = "pretzel.target" if "pretzel.target" in units else None
     services = [u for u in units if u.endswith(".service")]
     if target:
-        run_cmd(["systemctl", "enable", target], msg=f"{target} 활성화", check=False)
+        run_cmd(["systemctl", "enable", target], msg=f"Enabling {target}", check=False)
     for s in services:
         subprocess.run(["systemctl", "enable", s], check=False,
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    say(f"{len(services)}개 서비스 활성화")
-    run_cmd(["systemctl", "restart"] + services, msg="서비스 시작", check=False)
+    say(f"Enabled {len(services)} services")
+    run_cmd(["systemctl", "restart"] + services, msg="Starting services", check=False)
 
     time.sleep(2)
     failed = [s for s in services
               if subprocess.run(["systemctl", "is-active", "--quiet", s],
                                 check=False).returncode != 0]
     ok = len(services) - len(failed)
-    say(f"기동 결과: {ok}/{len(services)} 정상")
+    say(f"Startup: {ok}/{len(services)} running")
     if failed:
         print()
-        say(f"뜨지 않은 서비스: {', '.join(failed)}")
+        say(f"Did not start: {', '.join(failed)}")
         for s in failed[:3]:
             print(f"      journalctl -u {s} -n 30 --no-pager")
     return not failed
@@ -236,7 +238,7 @@ def start_services(units):
 
 def install(args):
     mf = manifest()
-    say(f"pretzel 패키지 {mf.get('version','?')} (빌드 {mf.get('built_at','?')})")
+    say(f"pretzel package {mf.get('version','?')} (built {mf.get('built_at','?')})")
     preflight(mf)
     verify_files(mf)
     check_linkage()
@@ -252,25 +254,25 @@ def install(args):
     if not ready and not args.force:
         run_cmd(["systemctl", "daemon-reload"], msg="systemctl daemon-reload")
         print()
-        say("파일 설치는 끝났다. 위 사전 요건을 갖춘 뒤 서비스를 올릴 것:")
+        say("Files are installed. Satisfy the prerequisites above, then bring the services up:")
         print("      sudo systemctl restart pretzel.target")
-        print("      (또는 요건을 갖춘 상태에서 이 설치를 다시 실행)")
+        print("      (or re-run this installer once they are in place)")
         return
 
     all_up = start_services(units)
     print()
     if all_up:
-        say("설치 완료. 웹 콘솔은 https://<이 호스트> 로 접속한다.")
+        say("Install complete. The web console is at https://<this host>.")
     else:
-        say("설치는 끝났으나 일부 서비스가 뜨지 않았다. 위 journalctl 명령으로 원인을 볼 것.")
+        say("Install finished but some services did not start. See the journalctl commands above.")
 
 
 def main():
     ap = argparse.ArgumentParser(prog="pretzel-package")
     sub = ap.add_subparsers(dest="cmd")
-    p = sub.add_parser("install", help="이 호스트에 설치한다")
+    p = sub.add_parser("install", help="install on this host")
     p.add_argument("--force", action="store_true",
-                   help="사전 요건이 없어도 서비스를 올린다")
+                   help="start the services even if prerequisites are missing")
     args = ap.parse_args()
     if args.cmd != "install":
         ap.print_help()

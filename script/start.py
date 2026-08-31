@@ -122,9 +122,9 @@ def deploy_startup_config() -> None:
 
     # Inject the canonical DB password — single source of truth.
     try:
-        cfg["mgmtd"]["service"]["database"]["password"] = PG_DB_PASSWORD
+        cfg["pretzel"]["database"]["password"] = PG_DB_PASSWORD
     except (KeyError, TypeError):
-        print("[WARN] startup-config has no mgmtd.service.database block; "
+        print("[WARN] startup-config has no pretzel.database block; "
               "leaving DB password as-is.")
 
     os.makedirs(ETC_ROOT_DIR, exist_ok=True)

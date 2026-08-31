@@ -99,15 +99,6 @@ PGADMIN_VENV             = os.path.join(INSTALL_ROOT, "pgadmin", "venv")
 PGADMIN_SETUP_EMAIL      = os.environ.get("PZ_PGADMIN_EMAIL", "admin@pretzel.io")
 PGADMIN_SETUP_PASSWORD   = os.environ.get("PZ_PGADMIN_PASSWORD", "padmin")
 
-# pz-inferd is the one daemon that is not a compiled binary, so it needs a Python
-# environment rather than a place in build/bin. These paths are deployment paths under
-# /opt/pretzel, NOT INSTALL_ROOT — 3rd_party/ holds sources the build links against,
-# while this is something the running appliance loads.
-#
-# They live here rather than in start.py because both scripts need them and they must
-# agree: install.py CREATES the venv, start.py writes the launcher that EXECS it. When
-# start.py owned the constant alone, nothing created what it pointed at and the unit
-# failed at exec on every box that was not the developer's.
 # PostgreSQL is installed from the distro APT repo (not built from source) and
 # runs under its own systemd unit (postgresql.service). Pretzel provisions a
 # dedicated login role + database; pz-mgmtd connects over localhost TCP.
@@ -121,8 +112,9 @@ PG_DB_USER     = "pretzel"
 # data at all — it is a shipped artifact that costs a crawl and a nine-minute embedding run to
 # rebuild — so it lives in a database that reset never opens.
 #
-# Fallback only: the authoritative name is inferd.service.retrieval.database.name in
-# config/startup-config.json, which is what the daemon connects to.
+# The name is fixed here now. The daemon that used to declare it in startup-config was
+# deleted, and retrieval has not been re-homed onto pretzel-ai yet, so this constant is the
+# only thing naming the database until it is.
 PG_RAG_DB_NAME = "pretzel_rag"
 # Single source of truth for the DB password. install.py uses it to CREATE the role;
 # start.py injects it into the deployed startup-config, so the role and mgmtd can never

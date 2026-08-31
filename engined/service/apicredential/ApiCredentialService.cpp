@@ -33,12 +33,12 @@ void ApiCredentialService::handleEvent(EnginedServiceManager& serviceManager, co
         return;
     }
 
-    if (event.type() == ApiCredentialEventType::ReceiveGatewayCredential)
+    if (event.type() == ApiCredentialEventType::ReceiveAiCredential)
     {
         if (in && !in->getPayload().empty())
         {
             const auto& pl = in->getPayload();
-            storeGatewayCredential(std::string(reinterpret_cast<const char*>(pl.data()), pl.size()));
+            storeAiCredential(std::string(reinterpret_cast<const char*>(pl.data()), pl.size()));
         }
         return;
     }
@@ -154,10 +154,11 @@ void ApiCredentialService::storeState(const std::string& payloadJson)
         LOG_WARN("api_credential_state write failed (oid={})", oid);
 }
 
-// inferd sealed the operator's gateway key and handed it over. Stored by id ('portkey' today) so a
-// second gateway — a failover endpoint, a direct-to-provider key for the bypass path — is a new row
-// rather than a schema change.
-void ApiCredentialService::storeGatewayCredential(const std::string& payloadJson)
+// mgmtd sealed one of the assistant's vendor API keys and handed it over. Stored by id — 'openai',
+// 'google', 'anthropic' — one row per vendor, because a key is issued by the vendor and works for
+// every model they serve. Keyed rather than a singleton so a fourth vendor is a new row and not a
+// schema change.
+void ApiCredentialService::storeAiCredential(const std::string& payloadJson)
 {
     nlohmann::json root;
     try
@@ -166,14 +167,31 @@ void ApiCredentialService::storeGatewayCredential(const std::string& payloadJson
     }
     catch (const std::exception& e)
     {
-        LOG_WARN("malformed GatewayCredentialStateUpdate ({}) — dropping", e.what());
+        LOG_WARN("malformed AiCredentialStateUpdate ({}) — dropping", e.what());
         return;
     }
 
     const std::string id = root.value("id", "");
     if (id.empty())
     {
-        LOG_WARN("GatewayCredentialStateUpdate without id — dropping");
+        LOG_WARN("AiCredentialStateUpdate without id — dropping");
+        return;
+    }
+
+    // Removing a key is its own instruction, not an empty string: `key_enc` is COALESCEd below so
+    // that a store carrying only a test result leaves the key alone, which means "" cannot also
+    // mean "delete it". An operator taking a vendor out of service needs the key gone, not the row
+    // silently keeping it.
+    if (root.value("clear", false))
+    {
+        const bool cleared = pz::db::Database::instance().exec(
+            "UPDATE ai_provider_credential_state SET key_enc = NULL, last_test_at = NULL, "
+            "last_test_ok = NULL, last_test_note = NULL, updated_at = now() WHERE id = $1",
+            {id});
+        if (cleared)
+            LOG_INFO("ai vendor credential cleared (id={})", id);
+        else
+            LOG_WARN("ai_provider_credential_state clear failed (id={})", id);
         return;
     }
 
@@ -185,14 +203,14 @@ void ApiCredentialService::storeGatewayCredential(const std::string& payloadJson
     const std::string note = root.value("note", "");
 
     const bool wrote = pz::db::Database::instance().exec(
-        "INSERT INTO ai_gateway_credential_state (id, key_enc, last_test_at, last_test_ok, last_test_note) "
+        "INSERT INTO ai_provider_credential_state (id, key_enc, last_test_at, last_test_ok, last_test_note) "
         "VALUES ($1, NULLIF($2,''), CASE WHEN $5::boolean THEN now() END, "
         "CASE WHEN $5::boolean THEN $3::boolean END, CASE WHEN $5::boolean THEN $4 END) "
         "ON CONFLICT (id) DO UPDATE SET "
-        "key_enc = COALESCE(EXCLUDED.key_enc, ai_gateway_credential_state.key_enc), "
-        "last_test_at = COALESCE(EXCLUDED.last_test_at, ai_gateway_credential_state.last_test_at), "
-        "last_test_ok = COALESCE(EXCLUDED.last_test_ok, ai_gateway_credential_state.last_test_ok), "
-        "last_test_note = COALESCE(EXCLUDED.last_test_note, ai_gateway_credential_state.last_test_note), "
+        "key_enc = COALESCE(EXCLUDED.key_enc, ai_provider_credential_state.key_enc), "
+        "last_test_at = COALESCE(EXCLUDED.last_test_at, ai_provider_credential_state.last_test_at), "
+        "last_test_ok = COALESCE(EXCLUDED.last_test_ok, ai_provider_credential_state.last_test_ok), "
+        "last_test_note = COALESCE(EXCLUDED.last_test_note, ai_provider_credential_state.last_test_note), "
         "updated_at = now()",
         {id, keyEnc, ok ? "true" : "false", note, hasTest ? "true" : "false"});
 
@@ -201,7 +219,7 @@ void ApiCredentialService::storeGatewayCredential(const std::string& payloadJson
         LOG_INFO("gateway credential stored (id={}, test={}, key={})", id,
                  hasTest ? (ok ? "ok" : "failed") : "none", keyEnc.empty() ? "unchanged" : "new");
     else
-        LOG_WARN("ai_gateway_credential_state write failed (id={})", id);
+        LOG_WARN("ai_provider_credential_state write failed (id={})", id);
 }
 
 void ApiCredentialService::sendState(EnginedServiceManager& serviceManager, pz::ipc::IpcDaemon requester,

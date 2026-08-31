@@ -24,13 +24,13 @@ namespace
 
 std::chrono::milliseconds pollInterval()
 {
-    const auto& p = pz::config::Config::serviceSection("engined", "probe");
+    const auto& p = pz::config::Config::section(pz::config::scope::kPretzel, "probe");
     return std::chrono::seconds(p.value("poll_interval_sec", 30));
 }
 
 std::chrono::milliseconds responseTimeout()
 {
-    const auto& p = pz::config::Config::serviceSection("engined", "probe");
+    const auto& p = pz::config::Config::section(pz::config::scope::kPretzel, "probe");
     return std::chrono::seconds(p.value("response_timeout_sec", 20));
 }
 
@@ -204,7 +204,7 @@ void ProbeService::onSaseHealthResult(EnginedServiceManager& serviceManager, con
 
 void ProbeService::projectInventory()
 {
-    const auto& site = pz::config::Config::serviceSection("engined", "site");
+    const auto& site = pz::config::Config::section(pz::config::scope::kPretzel, "site");
     auto& db = pz::db::Database::instance();
 
     // Upsert only the config-projected columns; runtime state (status/last_seen/api_key_enc/

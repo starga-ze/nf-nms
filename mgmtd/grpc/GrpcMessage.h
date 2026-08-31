@@ -200,6 +200,24 @@ struct GrpcMessage
         return out;
     }
 
+    // ApplyConfig: the assistant's whole deployment, as the JSON document AiConfig assembled —
+    // the running-config section with each enabled vendor's key unsealed into it.
+    //
+    // Carried as JSON rather than as named fields like everything above, because this is the one
+    // command whose shape is the configuration's shape: naming its fields here would mean editing
+    // this envelope every time the config schema gains a key, and an envelope that has to be
+    // edited for that is an envelope holding an opinion about the payload. GrpcClient turns it
+    // into the protobuf message; nothing between here and there reads it.
+    std::string configJson;
+
+    static GrpcMessage applyConfig(std::string configJson)
+    {
+        GrpcMessage out;
+        out.cmd = GrpcCmd::ApplyConfig;
+        out.configJson = std::move(configJson);
+        return out;
+    }
+
     static GrpcMessage corpus(GrpcCmd cmd, std::uint32_t ticket, std::string scope = {},
                               std::string docset = {})
     {

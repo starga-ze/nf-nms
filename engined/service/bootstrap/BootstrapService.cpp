@@ -26,7 +26,7 @@ namespace
 
 const nlohmann::json& bootstrapConfig()
 {
-    return pz::config::Config::serviceSection("engined", "bootstrap");
+    return pz::config::Config::section(pz::config::scope::kPretzel, "bootstrap");
 }
 
 std::chrono::milliseconds clientHelloInterval()
@@ -415,12 +415,10 @@ void BootstrapService::initProcessMap()
     m_processMap[pz::ipc::IpcDaemon::Collectord] = {false, 0, 0};
     m_processMap[pz::ipc::IpcDaemon::Topologyd] = {false, 0, 0};
     m_processMap[pz::ipc::IpcDaemon::Apid] = {false, 0, 0};
-    // inferd converges with the rest of the fleet. It consumes the running config like any other
-    // service daemon (its gateway settings live there), so RuntimeStart must not be sent until it
-    // has reported the target version — otherwise it would run one cycle against whatever it read
-    // at boot while everyone else has already moved on.
-    
-    //m_processMap[pz::ipc::IpcDaemon::Inferd] = {false, 0, 0};
+    // The assistant is deliberately absent. pretzel-ai consumes the running config like a service
+    // daemon does, but it is not on this fabric — it is reached over gRPC and answers no SyncRequest,
+    // so waiting on it here would be waiting forever. Its section is delivered by mgmtd over that
+    // gRPC edge (ApplyConfig) instead, and the fleet converges without it.
 
     m_targetVersion = pz::config::Config::runningConfigVersion();
 

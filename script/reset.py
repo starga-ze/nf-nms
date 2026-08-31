@@ -49,6 +49,7 @@ PZ_TABLES = [
     "ngfw_device",        # device projection (ICMP-reached firewalls)
     "sase_device",        # device projection (API-reached tenants) + sealed api-key + egress cache
     "api_credential_state",
+    "ai_provider_credential_state",  # the AI providers' sealed API keys
     "api_collection",     # connector endpoint-poll samples
     "system_log",         # tailed daemon logs
     "system_log_offset",  # per-daemon tailer checkpoint

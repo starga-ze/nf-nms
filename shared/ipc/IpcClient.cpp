@@ -17,15 +17,15 @@ namespace pz::ipc
 namespace
 {
 
-int connectMaxAttempts(IpcDaemon selfId)
+int connectMaxAttempts()
 {
-    const auto& ipc = pz::config::Config::systemSection(IpcProtocol::daemonToStr(selfId), "ipc");
+    const auto& ipc = pz::config::Config::section(pz::config::scope::kGlobal, "ipc");
     return ipc.value("ipc_retry_attempts", 10);
 }
 
-int connectRetryDelayMs(IpcDaemon selfId)
+int connectRetryDelayMs()
 {
-    const auto& ipc = pz::config::Config::systemSection(IpcProtocol::daemonToStr(selfId), "ipc");
+    const auto& ipc = pz::config::Config::section(pz::config::scope::kGlobal, "ipc");
     return ipc.value("ipc_retry_delay_ms", 1000);
 }
 
@@ -49,8 +49,8 @@ bool IpcClient::init()
     if (!initEpoll())
         return false;
 
-    const int maxAttempts = connectMaxAttempts(m_selfId);
-    const int retryDelayMs = connectRetryDelayMs(m_selfId);
+    const int maxAttempts = connectMaxAttempts();
+    const int retryDelayMs = connectRetryDelayMs();
 
     for (int attempt = 1; attempt <= maxAttempts; ++attempt)
     {

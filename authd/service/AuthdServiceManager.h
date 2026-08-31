@@ -27,7 +27,8 @@ public:
 
     void start() override;
 
-    void configure(const nlohmann::json& config);
+    // The `auth` domain itself, not a document to dig through.
+    void configure(const nlohmann::json& authConfig);
 
     void schedule() override;
     void postEvent(std::unique_ptr<AuthdEvent> event) override;

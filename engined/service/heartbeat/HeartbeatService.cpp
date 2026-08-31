@@ -20,13 +20,13 @@ namespace
 
 std::chrono::milliseconds pollInterval()
 {
-    const auto& hb = pz::config::Config::serviceSection("engined", "heartbeat");
+    const auto& hb = pz::config::Config::section(pz::config::scope::kPretzel, "heartbeat");
     return std::chrono::seconds(hb.value("poll_interval_sec", 5));
 }
 
 std::chrono::milliseconds responseTimeout()
 {
-    const auto& hb = pz::config::Config::serviceSection("engined", "heartbeat");
+    const auto& hb = pz::config::Config::section(pz::config::scope::kPretzel, "heartbeat");
     return std::chrono::seconds(hb.value("response_timeout_sec", 2));
 }
 

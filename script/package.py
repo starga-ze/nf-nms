@@ -1,20 +1,21 @@
-"""./pretzel package — prod 호스트로 옮길 설치 tar 를 만든다.
+"""./pretzel package — build the installer tarball for a production host.
 
-    ./pretzel package              # tmp/pretzel-package-<날짜>.tar.gz
+    ./pretzel package              # tmp/pretzel-package-<stamp>.tar.gz
     ./pretzel package --out /tmp
 
-script/tar.py 와 무엇이 다른가: tar.py 는 빌드 트리를 통째로 묶는 개발자용 스냅샷이다. 이쪽은
-prod 에서 '실행에 필요한 것'만 담고 설치 스크립트를 함께 넣는다 — prod 에는 저장소도, cmake 도,
-3rd_party/ 도 없다고 가정한다.
+How this differs from script/tar.py: that one archives the whole build tree as a developer
+snapshot. This one carries only what is needed to run, together with an installer — a production
+host is assumed to have no repository, no cmake and no 3rd_party/.
 
-    bin/                컴파일된 데몬 (test-* 제외)
-    share/mgmtd/www/    웹 콘솔 정적 파일
-    service/            systemd 유닛
-    pretzel-package     설치 스크립트 (script/installer.py)
+    bin/                compiled daemons (test-* excluded)
+    share/mgmtd/www/    web console static files
+    service/            systemd units
+    pretzel-package     the installer (script/installer.py)
 
-바이너리는 gRPC·protobuf·boost·spdlog 를 정적 링크하므로 3rd_party/ 를 함께 옮길 필요가 없다.
-남는 동적 의존성은 배포판이 주는 것뿐이라 OS 만 맞으면 그대로 돈다 — MANIFEST 에 OS 를 적어
-두고 설치 시점에 대조하며, 설치기가 ldd 로 한 번 더 실제 확인한다.
+The binaries link gRPC, protobuf, boost and spdlog statically, so 3rd_party/ does not have to
+travel with them. The only dynamic dependencies left are the ones the distribution provides
+(libpq, libssl and so on), so the binaries run as they are once the OS matches — MANIFEST records
+the OS and the installer confirms the linkage with ldd on arrival.
 """
 
 import datetime
@@ -22,7 +23,6 @@ import hashlib
 import json
 import os
 import shutil
-import subprocess
 import sys
 import tarfile
 
@@ -35,8 +35,10 @@ WWW_SRC = os.path.join(ROOT_DIR, "mgmtd", "www")
 
 NAME = "pretzel-package"
 
-# test-* 는 개발용 실행파일이라 prod 에 갈 이유가 없다. pz-pgadmin 은 start.py 가 호스트마다
-# 경로를 박아 생성하는 래퍼라 패키지에 담으면 틀린 경로가 굳는다 — 제외한다.
+
+# test-* are development executables with no reason to reach production. pz-pgadmin is excluded
+# too: start.py generates it per host with paths baked in, so shipping one would freeze the
+# wrong paths.
 def _wanted_binary(name):
     return name.startswith("pz-") and not name.startswith("test-")
 
@@ -72,17 +74,17 @@ def _os_id():
 
 def _check_built():
     if not os.path.isdir(BUILD_BIN_DIR):
-        sys.exit(f"[Error] 빌드 산출물이 없다: {BUILD_BIN_DIR}\n"
-                 f"        먼저 ./pretzel build 를 돌릴 것.")
+        sys.exit(f"[Error] No build output at {BUILD_BIN_DIR}\n"
+                 f"        Run ./pretzel build first.")
     got = [f for f in os.listdir(BUILD_BIN_DIR) if _wanted_binary(f)]
     if not got:
-        sys.exit(f"[Error] {BUILD_BIN_DIR} 에 pz-* 바이너리가 없다.\n"
-                 f"        먼저 ./pretzel build 를 돌릴 것.")
+        sys.exit(f"[Error] No pz-* binaries in {BUILD_BIN_DIR}\n"
+                 f"        Run ./pretzel build first.")
     return sorted(got)
 
 
 def _stale_warning(names):
-    """소스보다 오래된 바이너리를 담는 것은 흔한 사고다. 막지는 않되 알린다."""
+    """Packaging binaries older than the source is a common accident. Warn, but do not block."""
     newest_src = 0
     for sub in ("mgmtd", "shared", "engined", "apid"):
         d = os.path.join(ROOT_DIR, sub)
@@ -93,14 +95,14 @@ def _stale_warning(names):
             for f in files:
                 if f.endswith((".cpp", ".h", ".proto")):
                     newest_src = max(newest_src, os.path.getmtime(os.path.join(root, f)))
-    # 가장 새 바이너리와 견준다. 가장 오래된 것과 견주면, 한 모듈만 고쳐 빌드했을 때
-    # 손대지 않은 다른 바이너리가 오래됐다는 이유로 매번 경고가 뜬다 — 그런 경고는 곧
-    # 무시하게 되고, 진짜로 빌드를 빠뜨린 날에도 똑같이 무시된다.
+    # Compare against the newest binary. Comparing against the oldest would warn every time one
+    # module was rebuilt on its own, because the untouched binaries are older — and a warning
+    # that fires every time is one that gets ignored on the day it is real.
     newest_bin = max(os.path.getmtime(os.path.join(BUILD_BIN_DIR, n)) for n in names)
     if newest_src > newest_bin:
         d = datetime.datetime.fromtimestamp(newest_src).strftime("%m-%d %H:%M")
-        print(f"[!] 경고: 바이너리보다 새 소스가 있다 (가장 최근 수정 {d}).")
-        print("    ./pretzel build 를 먼저 돌리는 것이 맞는지 확인할 것.")
+        print(f"[!] Warning: source is newer than the binaries (latest edit {d}).")
+        print("    Check whether ./pretzel build should be run first.")
 
 
 def run():
@@ -120,42 +122,42 @@ def run():
         shutil.rmtree(stage_root)
     os.makedirs(stage)
 
-    print(f"[*] {NAME} 을(를) 만든다 — {_os_id()} / {os.uname().machine}")
+    print(f"[*] Building {NAME} — {_os_id()} / {os.uname().machine}")
 
-    # 1. 바이너리
+    # 1. binaries
     bindir = os.path.join(stage, "bin")
     os.makedirs(bindir)
     for n in names:
         shutil.copy2(os.path.join(BUILD_BIN_DIR, n), os.path.join(bindir, n))
-    # core 덤프 핸들러는 빌드 산출물이 아니라 저장소가 들고 있는 스크립트다.
+    # The core-dump handler is a repository script, not a build output.
     ch = os.path.join(SCRIPT_BIN_DIR, "pz-core-handler")
     if os.path.isfile(ch):
         shutil.copy2(ch, os.path.join(bindir, "pz-core-handler"))
         names = names + ["pz-core-handler"]
-    print(f"  담음: bin/  ({len(names)}개)")
+    print(f"  added: bin/  ({len(names)} binaries)")
 
-    # 2. 웹 콘솔
+    # 2. web console
     if os.path.isdir(WWW_SRC):
         dst = os.path.join(stage, "share", "mgmtd", "www")
         os.makedirs(os.path.dirname(dst), exist_ok=True)
         shutil.copytree(WWW_SRC, dst,
                         ignore=lambda d, ns: [n for n in ns if _skip(n)])
         cnt = sum(len(f) for _, _, f in os.walk(dst))
-        print(f"  담음: share/mgmtd/www/  ({cnt}개 파일)")
+        print(f"  added: share/mgmtd/www/  ({cnt} files)")
 
-    # 3. systemd 유닛
+    # 3. systemd units
     if os.path.isdir(SERVICE_SRC):
         dst = os.path.join(stage, "service")
         shutil.copytree(SERVICE_SRC, dst,
                         ignore=lambda d, ns: [n for n in ns if _skip(n)])
-        print(f"  담음: service/  ({len(os.listdir(dst))}개 유닛)")
+        print(f"  added: service/  ({len(os.listdir(dst))} units)")
 
-    # 4. 설치 스크립트
+    # 4. installer
     installer = os.path.join(stage, NAME)
     shutil.copy2(os.path.join(SCRIPT_DIR, "installer.py"), installer)
     os.chmod(installer, 0o755)
 
-    # 5. 무결성 목록
+    # 5. checksums
     files = {}
     for root, dirs, fnames in os.walk(stage):
         dirs[:] = [d for d in dirs if not _skip(d)]
@@ -185,9 +187,9 @@ def run():
 
     size = os.path.getsize(tar_path) / 1048576
     print()
-    print(f"[*] 완성: {tar_path}  ({size:.1f} MB, {len(files)}개 파일)")
+    print(f"[*] Built: {tar_path}  ({size:.1f} MB, {len(files)} files)")
     print()
-    print("    prod 에서:")
+    print("    On the production host:")
     print(f"      scp {os.path.basename(tar_path)} prod:~/")
     print(f"      tar xzf {os.path.basename(tar_path)}")
     print(f"      cd {NAME} && sudo ./{NAME} install")

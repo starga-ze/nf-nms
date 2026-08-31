@@ -136,7 +136,7 @@
       if (r.status === 401) { location.href = '/'; return; }
       const d = await r.json();
       window.NMS.draft.checkBase(d.version);
-      const api = ((d.daemons || {}).collectord || {}).api || {};
+      const api = ((d.scopes || {}).pretzel || {}).connector || {};
       deployed = (Array.isArray(api.api_credentials) ? api.api_credentials : []).map(normalize);
     } catch (_) { deployed = []; }
     await loadKeyState();   // shared per-key runtime state (stored/expiry/last test)
@@ -145,7 +145,7 @@
     refreshPending();
   }
 
-  const commitPayload = () => [{ daemon: 'collectord', domain: 'api', values: { api_credentials: state.keys } }];
+  const commitPayload = () => [{ scope: 'pretzel', domain: 'connector', values: { api_credentials: state.keys } }];
 
   window.NMS.staging.register({
     key: DRAFT_KEY,

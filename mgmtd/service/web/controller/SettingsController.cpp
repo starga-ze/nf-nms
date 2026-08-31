@@ -24,8 +24,10 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -38,30 +40,40 @@ using json = nlohmann::json;
 namespace
 {
 
-// The daemon sections a commit may address, and the ones GET /api/settings projects for the
-// editors. "pretzel-ai" is in the list without being an IPC daemon: it is a separate service
-// reached over gRPC, but its deployment is operator-declared configuration and belongs in the same
-// versioned document as everything else. What differs is delivery — engined's ConfigApply broadcast
-// cannot reach it, so the new section is pushed to the service over the gRPC edge instead.
-constexpr const char* kSettingsDaemons[] = {
-    "engined", "authd", "probed", "collectord", "topologyd", "pretzel-ai",
+// The scopes a commit may address, and the ones GET /api/settings projects for the editors.
+// `global` is deliberately absent: it is infrastructure (the IPC socket, where logs go), not
+// something an operator decides, and a console that offered to edit it would be offering to break
+// the fabric the console itself answers on.
+//
+// "pretzel-ai" is here without being on the IPC fabric at all: it is a separate service reached
+// over gRPC, but its deployment is operator-declared configuration and belongs in the same
+// versioned document as everything else. What differs is delivery — engined's ConfigApply
+// broadcast cannot reach it, so the section is pushed over the gRPC edge instead (ApplyConfig),
+// and it is therefore absent from engined's bootstrap convergence set too: the fleet does not
+// wait on a peer that is not on the bus.
+constexpr const char* kSettingsScopes[] = {
+    pz::config::scope::kPretzel,
+    pz::config::scope::kPretzelAi,
 };
 
+// Domains the settings API does not project. `bootstrap` is internal tuning that lives in compiled
+// defaults rather than the document; `auth` is served by its own endpoint (SsoController), which
+// knows which of its fields may be shown.
 constexpr const char* kHiddenDomains[] = {
     "bootstrap",
     "auth",
 };
 
 // ── Commit schema ────────────────────────────────────────────────────────────
-// The commit endpoint is generic — any domain of a known daemon passes through — but the
+// The commit endpoint is generic — any domain of a known scope passes through — but the
 // domains the UI publishes carry a declared schema, validated here so a malformed entry never
-// reaches the running_config. One schema per (daemon, domain, key); everything else is opaque.
+// reaches the running_config. One schema per (scope, domain, key); everything else is opaque.
 //
 // Every configuration object is identified by exactly one field, `oid`: a UUID string issued at
 // creation and immutable for the object's lifetime. Cross-references (site, auth_profile,
 // object) carry the referent's oid.
 
-// engined.site.ngfw_devices / sase_devices — Devices (www/js/config.js). The array is the type,
+// pretzel.site.ngfw_devices / sase_devices — Devices (www/js/config.js). The array is the type,
 // so there is no device_type field. Both kinds need an oid and an access target:
 //   ngfw: { oid, name, description?, site?, target, fingerprint? }   fingerprint from the API Key test
 //   sase: { oid, name, description?, site?, target, health:{url,body}? }   api-key lives in the DB, not here
@@ -72,7 +84,7 @@ bool validDevice(const json& d)
     return !d.value("oid", std::string()).empty() && !d.value("target", std::string()).empty();
 }
 
-// engined.site.sites — Sites, one per customer (www/js/sites.js).
+// pretzel.site.sites — Sites, one per customer (www/js/sites.js).
 //   { oid, name, description? }
 bool validSite(const json& s)
 {
@@ -81,7 +93,7 @@ bool validSite(const json& s)
     return !s.value("oid", std::string()).empty() && !s.value("name", std::string()).empty();
 }
 
-// collectord.api.api_credentials — API Keys (www/js/api-keys.js). Bound to a device because a PAN-OS key is
+// pretzel.connector.api_credentials — API Keys (www/js/api-keys.js). Bound to a device because a PAN-OS key is
 // issued by one box and worthless on another. The password and the issued key are NOT here:
 // running_config is append-versioned and shown verbatim in the review diff, so a secret written
 // there would be permanent and visible. They stay in the operator's browser until the encrypted
@@ -107,7 +119,7 @@ bool validApiKey(const json& k)
     return true;
 }
 
-// collectord.api.endpoints — API Endpoints (www/js/endpoints.js). Device-independent on purpose: the
+// pretzel.connector.endpoints — API Endpoints (www/js/endpoints.js). Device-independent on purpose: the
 // definition is reusable, and a test names an API Key, which carries the device it was issued by.
 // The release sits inside the path (/restapi/v10.2/…) and pretzel does not rewrite it.
 //
@@ -192,7 +204,7 @@ bool validApiEndpoint(const json& e)
     return true;
 }
 
-// collectord.api.connectors — API Connectors (www/js/api-connectors.js).
+// pretzel.connector.connectors — API Connectors (www/js/api-connectors.js).
 //   { oid, name, description?, object, auth_profile,
 //     items: [{ endpoint, poll_interval_sec, enabled }] }
 //
@@ -254,7 +266,7 @@ bool validApiConnector(const json& c)
 // nothing else; only the assembling belongs here.
 bool validateApiReferences(const json& values, std::string& error)
 {
-    json effective = pz::config::Config::serviceSection("collectord", "api");
+    json effective = pz::config::Config::section(pz::config::scope::kPretzel, "connector");
     if (!effective.is_object())
         effective = json::object();
 
@@ -264,53 +276,11 @@ bool validateApiReferences(const json& values, std::string& error)
     return pz::config::checkApiReferences(effective, error);
 }
 
-// pretzel-ai.route — the deployment matrix (www/js/ai-assistant.js).
-//   { llm: gateway|direct, guardrail: gateway|airs|none, require_guardrail?: bool }
-//
-// Two independent axes. Five of the six combinations are deployments somebody runs; the sixth is
-// refused here for the same reason pretzel-ai refuses it at startup — inspection cannot be
-// delegated to a gateway that is not on the path, and an appliance that accepted it would serve
-// turns nobody checks. Checked against the EFFECTIVE post-commit view (stored, overlaid with what
-// is arriving), because an editor may publish one axis without the other.
-bool validateAiRoute(const json& values, std::string& error)
-{
-    json effective = pz::config::Config::serviceSection("pretzel-ai", "route");
-    if (!effective.is_object())
-        effective = json::object();
-    for (auto it = values.begin(); it != values.end(); ++it)
-        effective[it.key()] = it.value();
-
-    const std::string llm = effective.value("llm", std::string("gateway"));
-    const std::string guardrail = effective.value("guardrail", std::string("gateway"));
-
-    if (llm != "gateway" && llm != "direct")
-    {
-        error = "route.llm must be 'gateway' or 'direct'";
-        return false;
-    }
-    if (guardrail != "gateway" && guardrail != "airs" && guardrail != "none")
-    {
-        error = "route.guardrail must be 'gateway', 'airs' or 'none'";
-        return false;
-    }
-    if (effective.contains("require_guardrail") && !effective["require_guardrail"].is_boolean())
-    {
-        error = "route.require_guardrail must be true or false";
-        return false;
-    }
-    if (guardrail == "gateway" && llm == "direct")
-    {
-        error = "route.guardrail 'gateway' needs route.llm 'gateway' — there is no gateway on this "
-                "path to defer to";
-        return false;
-    }
-    return true;
-}
-
 // No key, token or password may be committed. running_config is append-versioned, rendered verbatim
 // in the review diff and written out by Save-to-file, so a secret written here would be permanent
-// and readable by every reviewer. The AI gateway's own subscription key is held sealed in
-// ai_gateway_credential_state instead; these domains carry only the declaration around it.
+// and readable by every reviewer. Each vendor's API key is held sealed in
+// ai_provider_credential_state under the provider's own id instead; these domains carry only the
+// declaration around it.
 bool rejectSecrets(const json& values, const char* domain, std::string& error)
 {
     for (const auto* secret : {"api_key", "key", "token", "password", "secret"})
@@ -324,81 +294,42 @@ bool rejectSecrets(const json& values, const char* domain, std::string& error)
     return true;
 }
 
-// pretzel-ai.gateway — where the completions leg points, and how a turn is shaped. The model
-// catalog is deliberately NOT here: which models exist is a fact about the gateway account, read
-// back over ListModels, not a declaration that could be rolled back like a policy.
-bool validateAiGateway(const json& values, std::string& error)
-{
-    if (!rejectSecrets(values, "gateway", error))
-        return false;
+// The three vendors the assistant may be pointed at. Fixed, not an open list: each one is a
+// deliberate integration — an endpoint that speaks the OpenAI chat-completions shape, a sealed key
+// slot under the same id, and a console row — and a fourth id arriving in a commit would name a
+// provider nothing downstream knows how to serve.
+//
+// Named for the VENDOR, not the model family. The key belongs to Anthropic and the endpoint answers
+// for Anthropic; "claude" is what they serve, and using it here made every qualified model name say
+// it twice ("claude/claude-opus-5") while naming the wrong thing.
+constexpr const char* kAiProviders[] = {"openai", "google", "anthropic"};
 
-    if (values.contains("port"))
+bool knownAiProvider(const std::string& id)
+{
+    for (const auto* known : kAiProviders)
     {
-        const auto& p = values["port"];
-        if (!p.is_number_integer() || p.get<std::int64_t>() < 1 || p.get<std::int64_t>() > 65535)
-        {
-            error = "gateway.port must be 1-65535";
-            return false;
-        }
+        if (id == known)
+            return true;
     }
-    if (values.contains("tls") && !values["tls"].is_boolean())
-    {
-        error = "gateway.tls must be true or false";
-        return false;
-    }
-    if (values.contains("path"))
-    {
-        const std::string path = values.value("path", std::string());
-        if (path.empty() || path.front() != '/')
-        {
-            error = "gateway.path must begin with '/'";
-            return false;
-        }
-    }
-    for (const auto* positive : {"max_tokens", "timeout_sec"})
-    {
-        if (!values.contains(positive))
-            continue;
-        const auto& v = values[positive];
-        if (!v.is_number_integer() || v.get<std::int64_t>() < 1)
-        {
-            error = std::string("gateway.") + positive + " must be a positive integer";
-            return false;
-        }
-    }
-    return true;
+    return false;
 }
 
-// pretzel-ai.airs — the scan service, when this appliance owns the verdict. Either profile_name or
-// profile_id identifies the security profile; the scan API takes one of them, and which one is the
-// operator's to choose, so neither is required here on its own.
-bool validateAiAirs(const json& values, std::string& error)
-{
-    if (!rejectSecrets(values, "airs", error))
-        return false;
-
-    if (values.contains("fail_open") && !values["fail_open"].is_boolean())
-    {
-        error = "airs.fail_open must be true or false";
-        return false;
-    }
-    if (values.contains("timeout_sec"))
-    {
-        const auto& v = values["timeout_sec"];
-        if (!v.is_number_integer() || v.get<std::int64_t>() < 1)
-        {
-            error = "airs.timeout_sec must be a positive integer";
-            return false;
-        }
-    }
-    return true;
-}
-
-// pretzel-ai.providers — the direct leg's endpoints, one per provider slug (the part of a model id
-// before the slash). A list rather than an object keyed by slug: a commit merges values into the
-// stored document, and a merged object can only ever gain keys — removing a provider would be
-// unexpressible. An array is replaced wholesale, which is what an editable list needs.
-//   { list: [{ id, url }] }
+// pretzel-ai.providers — the vendors this appliance has an account with, and which of their models
+// it may ask for.
+//   { list: [{ id, models: [{ id, label? }] }] }
+//
+// An entry carries exactly what an operator chooses. It does NOT carry:
+//   the endpoint  a fact about the vendor, not a setting. Compiled in on the pretzel-ai side, so
+//                 an operator cannot point "openai" at something that is not OpenAI, and so a new
+//                 vendor is a code change on the side that has to speak its dialect anyway.
+//   the API key   sealed in ai_provider_credential_state under this same id. running_config is
+//                 append-versioned and rendered verbatim in the review diff.
+//   enabled       removing the entry is how a vendor is taken out of service, the same as every
+//                 other list in this document. A second way to say "off" is a second state to keep
+//                 in step with the first.
+//
+// The list may be empty and may hold one, two or three entries — a fresh appliance has none. What
+// it may not do is name a vendor twice, or name one nothing downstream can serve.
 bool validateAiProviders(const json& values, std::string& error)
 {
     if (!rejectSecrets(values, "providers", error))
@@ -411,6 +342,7 @@ bool validateAiProviders(const json& values, std::string& error)
         return false;
     }
 
+    std::set<std::string> seen;
     std::size_t idx = 0;
     for (const auto& p : values["list"])
     {
@@ -420,17 +352,55 @@ bool validateAiProviders(const json& values, std::string& error)
             error = at + " is not an object";
             return false;
         }
-        if (p.value("id", std::string()).empty())
+
+        const std::string id = p.value("id", std::string());
+        if (!knownAiProvider(id))
         {
-            error = at + " has no provider id";
+            error = at + " has an unknown provider id '" + id + "' — one of openai, google, anthropic";
             return false;
         }
-        const std::string url = p.value("url", std::string());
-        if (url.rfind("http://", 0) != 0 && url.rfind("https://", 0) != 0)
+        if (!seen.insert(id).second)
         {
-            error = at + " (\"" + p.value("id", std::string()) + "\") needs an http(s) url";
+            error = at + " repeats provider '" + id + "'";
             return false;
         }
+
+        if (!p.contains("models"))
+            continue;
+
+        if (!p["models"].is_array())
+        {
+            error = at + " (\"" + id + "\") models must be an array";
+            return false;
+        }
+
+        std::set<std::string> models;
+        std::size_t midx = 0;
+        for (const auto& m : p["models"])
+        {
+            const std::string mat = at + ".models[" + std::to_string(midx++) + "]";
+            if (!m.is_object() || m.value("id", std::string()).empty())
+            {
+                error = mat + " has no model id";
+                return false;
+            }
+            const std::string mid = m.value("id", std::string());
+            // The vendor is the entry this sits under. A qualified name here would go out to the
+            // vendor with the prefix still on it, and refusing it is how that stays visible —
+            // stripping it would hide that the two halves disagreed about who serves the model.
+            if (mid.find('/') != std::string::npos)
+            {
+                error = mat + " (\"" + mid + "\") must be the bare model name — the provider is "
+                        "the entry it sits under";
+                return false;
+            }
+            if (!models.insert(mid).second)
+            {
+                error = mat + " repeats model '" + mid + "'";
+                return false;
+            }
+        }
+
         std::string secretError;
         if (!rejectSecrets(p, at.c_str(), secretError))
         {
@@ -438,12 +408,13 @@ bool validateAiProviders(const json& values, std::string& error)
             return false;
         }
     }
+
     return true;
 }
 
 // Shape only: every entry in every array this domain owns is well-formed on its own. Deliberately
 // says nothing about references — those cannot be judged one change at a time, see below.
-bool validateCommitShape(const std::string& daemon, const std::string& domain, const json& values,
+bool validateCommitShape(const std::string& scopeName, const std::string& domain, const json& values,
                          std::string& error)
 {
     auto validateArray = [&](const char* key, bool (*validEntry)(const json&))
@@ -470,40 +441,31 @@ bool validateCommitShape(const std::string& daemon, const std::string& domain, c
         return true;
     };
 
-    if (daemon == "engined" && domain == "site")
+    if (scopeName == pz::config::scope::kPretzel && domain == "site")
         return validateArray("sites", validSite) && validateArray("ngfw_devices", validDevice) &&
                validateArray("sase_devices", validDevice);
 
-    if (daemon == "collectord" && domain == "api")
+    if (scopeName == pz::config::scope::kPretzel && domain == "connector")
         return validateArray("api_credentials", validApiKey) && validateArray("endpoints", validApiEndpoint) &&
                validateArray("connectors", validApiConnector);
 
-    if (daemon == "pretzel-ai")
-    {
-        if (domain == "route")
-            return validateAiRoute(values, error);
-        if (domain == "gateway")
-            return validateAiGateway(values, error);
-        if (domain == "airs")
-            return validateAiAirs(values, error);
-        if (domain == "providers")
-            return validateAiProviders(values, error);
-    }
+    if (scopeName == pz::config::scope::kPretzelAi && domain == "providers")
+        return validateAiProviders(values, error);
 
     return true;
 }
 
-// Referential integrity, run once per (daemon, domain) over the MERGED values of every change in
+// Referential integrity, run once per (scope, domain) over the MERGED values of every change in
 // the batch that targets it — never per change. The three API editors each publish their own slice
-// of collectord.api (endpoints.js sends `endpoints`, api-connectors.js sends `connectors`,
+// of pretzel.connector (endpoints.js sends `endpoints`, api-connectors.js sends `connectors`,
 // api-keys.js sends `api_credentials`), so one operator action routinely arrives as several sibling
 // entries. Checking a connector entry against the stored config alone would reject the commonest
 // edit there is — add an endpoint and attach it — because the endpoint it points at is sitting in
 // the sibling entry, not yet in the database.
-bool validateCommitRefs(const std::string& daemon, const std::string& domain, const json& values,
+bool validateCommitRefs(const std::string& scopeName, const std::string& domain, const json& values,
                         std::string& error)
 {
-    if (daemon == "collectord" && domain == "api")
+    if (scopeName == pz::config::scope::kPretzel && domain == "connector")
         return validateApiReferences(values, error);
 
     return true;
@@ -515,33 +477,35 @@ void SettingsController::get(MgmtdServiceManager& sm, const pz::http::HttpReques
 {
     (void)sm;
     (void)req;
-    json daemons = json::object();
+    json scopes = json::object();
 
-    for (const auto* name : kSettingsDaemons)
+    for (const auto* scopeName : kSettingsScopes)
     {
-        const auto& root = pz::config::Config::daemonConfig(name);
-        const auto& allService = root.value("service", json::object());
+        const auto& stored = pz::config::Config::scopeConfig(scopeName);
 
-        json service = json::object();
-        for (const auto& [domain, values] : allService.items())
+        json projected = json::object();
+        for (const auto& [domain, values] : stored.items())
         {
+            if (domain.rfind("//", 0) == 0)
+                continue;
+
             const bool hidden = std::any_of(std::begin(kHiddenDomains), std::end(kHiddenDomains),
                                             [&](const char* d) { return domain == d; });
             if (hidden)
                 continue;
 
             json v = values;
-            if (domain == "http" && v.is_object())
+            if (domain == "console" && v.is_object())
                 v.erase("admin");
 
-            service[domain] = std::move(v);
+            projected[domain] = std::move(v);
         }
 
-        daemons[name] = std::move(service);
+        scopes[scopeName] = std::move(projected);
     }
 
     json body;
-    body["daemons"] = std::move(daemons);
+    body["scopes"] = std::move(scopes);
 
     // Version of the active running-config these values came from. The browser stamps its staged
     // edits with it: if the version later goes backwards, those drafts belong to a configuration
@@ -561,7 +525,7 @@ void SettingsController::get(MgmtdServiceManager& sm, const pz::http::HttpReques
     fill(resp, 200, body.dump());
 }
 
-// The whole active running-config, verbatim, as stored. /api/settings is a per-daemon,
+// The whole active running-config, verbatim, as stored. /api/settings is a per-scope,
 // hidden-domain-filtered projection for the editors; this is the raw document the operator sees
 // behind the topbar's View button. Secrets are already stripped on the way in (Config's
 // redactSecretsForPersist runs at persist time), so the stored copy is safe to return as-is.
@@ -612,7 +576,7 @@ void SettingsController::commit(MgmtdServiceManager& sm, const pz::http::HttpReq
     }
 
     if (!input.contains("changes") || !input["changes"].is_array())
-        return badRequest("expected {changes: [{daemon, domain, values}]}");
+        return badRequest("expected {changes: [{scope, domain, values}]}");
 
     const json& changes = input["changes"];
 
@@ -622,47 +586,47 @@ void SettingsController::commit(MgmtdServiceManager& sm, const pz::http::HttpReq
     int failed = 0;
 
     // Record a per-change rejection: logged (so the reason survives in mgmtd.log) and returned.
-    auto reject = [&](const std::string& daemon, const std::string& domain, const std::string& why) {
-        LOG_WARN("settings-commit rejected (daemon={}, domain={}, reason={})", daemon, domain, why);
-        results.push_back({{"daemon", daemon}, {"domain", domain}, {"ok", false}, {"error", why}});
+    auto reject = [&](const std::string& scopeName, const std::string& domain, const std::string& why) {
+        LOG_WARN("settings-commit rejected (scope={}, domain={}, reason={})", scopeName, domain, why);
+        results.push_back({{"scope", scopeName}, {"domain", domain}, {"ok", false}, {"error", why}});
         failed++;
     };
 
     for (const auto& change : changes)
     {
-        if (!change.contains("daemon") || !change.contains("domain") || !change.contains("values"))
+        if (!change.contains("scope") || !change.contains("domain") || !change.contains("values"))
         {
-            reject(change.value("daemon", ""), change.value("domain", ""), "entry is missing daemon/domain/values");
+            reject(change.value("scope", ""), change.value("domain", ""), "entry is missing scope/domain/values");
             continue;
         }
 
-        const std::string daemon = change.value("daemon", "");
+        const std::string scopeName = change.value("scope", "");
         const std::string domain = change.value("domain", "");
         const json& values = change["values"];
 
         if (!values.is_object())
         {
-            reject(daemon, domain, "values is not an object");
+            reject(scopeName, domain, "values is not an object");
             continue;
         }
 
-        const bool knownDaemon = std::any_of(std::begin(kSettingsDaemons), std::end(kSettingsDaemons),
-                                             [&](const char* d) { return daemon == d; });
+        const bool knownScope = std::any_of(std::begin(kSettingsScopes), std::end(kSettingsScopes),
+                                            [&](const char* s) { return scopeName == s; });
 
-        if (!knownDaemon)
+        if (!knownScope)
         {
-            reject(daemon, domain, "unknown daemon");
+            reject(scopeName, domain, "unknown scope");
             continue;
         }
 
         std::string schemaError;
-        if (!validateCommitShape(daemon, domain, values, schemaError))
+        if (!validateCommitShape(scopeName, domain, values, schemaError))
         {
-            reject(daemon, domain, schemaError.empty() ? "schema validation failed" : schemaError);
+            reject(scopeName, domain, schemaError.empty() ? "schema validation failed" : schemaError);
             continue;
         }
 
-        results.push_back({{"daemon", daemon}, {"domain", domain}, {"ok", true}});
+        results.push_back({{"scope", scopeName}, {"domain", domain}, {"ok", true}});
         resultOf.push_back(results.size() - 1);
         validChanges.push_back(change);
     }
@@ -675,7 +639,7 @@ void SettingsController::commit(MgmtdServiceManager& sm, const pz::http::HttpReq
         std::map<std::pair<std::string, std::string>, json> mergedByDomain;
         for (const auto& c : validChanges)
         {
-            json& dst = mergedByDomain[{c.value("daemon", std::string()), c.value("domain", std::string())}];
+            json& dst = mergedByDomain[{c.value("scope", std::string()), c.value("domain", std::string())}];
             if (!dst.is_object())
                 dst = json::object();
             // Key-level replacement, matching how the values are assembled for the check itself: an
@@ -693,7 +657,7 @@ void SettingsController::commit(MgmtdServiceManager& sm, const pz::http::HttpReq
             if (refError.empty())
                 refError = "reference check failed";
 
-            LOG_WARN("settings-commit rejected (daemon={}, domain={}, reason={})", target.first, target.second,
+            LOG_WARN("settings-commit rejected (scope={}, domain={}, reason={})", target.first, target.second,
                      refError);
 
             // It is the combination that broke the reference, not one entry in it, so every change
@@ -701,7 +665,7 @@ void SettingsController::commit(MgmtdServiceManager& sm, const pz::http::HttpReq
             // know which one to correct.
             for (std::size_t i = 0; i < validChanges.size(); ++i)
             {
-                if (validChanges[i].value("daemon", std::string()) != target.first ||
+                if (validChanges[i].value("scope", std::string()) != target.first ||
                     validChanges[i].value("domain", std::string()) != target.second)
                     continue;
 

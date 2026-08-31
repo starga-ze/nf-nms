@@ -20,7 +20,7 @@
     { v: 'error', label: 'Error' },
   ];
 
-  const DAEMONS = ['ipcd', 'engined', 'mgmtd', 'authd', 'probed', 'collectord', 'topologyd', 'apid', 'inferd'];
+  const DAEMONS = ['ipcd', 'engined', 'mgmtd', 'authd', 'probed', 'collectord', 'topologyd', 'apid'];
 
   // Row badge class per level name returned by the API.
   const LEVEL_CLASS = {

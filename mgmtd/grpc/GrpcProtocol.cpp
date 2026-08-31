@@ -9,6 +9,7 @@ const char* grpcCmdToStr(GrpcCmd cmd) noexcept
     {
     case GrpcCmd::Chat:          return "Chat";
     case GrpcCmd::ListModels:    return "ListModels";
+    case GrpcCmd::ApplyConfig:   return "ApplyConfig";
     case GrpcCmd::CorpusStatus:  return "CorpusStatus";
     case GrpcCmd::CorpusRefresh: return "CorpusRefresh";
     case GrpcCmd::CorpusCancel:  return "CorpusCancel";

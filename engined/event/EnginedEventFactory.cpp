@@ -89,8 +89,8 @@ std::unique_ptr<EnginedEvent> EnginedEventFactory::create(std::unique_ptr<pz::ip
     case pz::ipc::IpcCmd::SaseApiKeyUpdate:
         return std::make_unique<ApiCredentialEvent>(ApiCredentialEventType::ReceiveSaseApiKey, std::move(msg));
 
-    case pz::ipc::IpcCmd::GatewayCredentialStateUpdate:
-        return std::make_unique<ApiCredentialEvent>(ApiCredentialEventType::ReceiveGatewayCredential, std::move(msg));
+    case pz::ipc::IpcCmd::AiCredentialStateUpdate:
+        return std::make_unique<ApiCredentialEvent>(ApiCredentialEventType::ReceiveAiCredential, std::move(msg));
 
     default:
         LOG_WARN("unhandled cmd (cmd={})", static_cast<int>(msg->getCmd()));

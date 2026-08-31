@@ -41,13 +41,9 @@ protected:
     void onShutdown() override;
 
 private:
-    bool loadLoggerConfig();
-    bool loadIpcConfig();
     bool loadHttpConfig();
 
 private:
-    pz::config::LoggerConfig m_loggerConfig;
-    pz::config::IpcConfig m_ipcConfig;
     HttpConfig m_httpConfig;
 
     std::unique_ptr<pz::ipc::IpcClient> m_ipcClient;

@@ -4,7 +4,7 @@
  * hence the device mix rather than a bare count. Devices reference a site by `oid`, the UUID
  * issued at creation; pretzel uses one identifier per object, named oid.
  *
- * Committed under engined.service.site.sites. Loaded on every Configuration tab so the
+ * Committed under pretzel.site.sites. Loaded on every Configuration tab so the
  * Inventory picker and site columns resolve names from anywhere; rendered only on its own tab.
  */
 (function () {
@@ -55,7 +55,7 @@
       if (r.status === 401) { location.href = '/'; return; }
       const d = await r.json();
       window.NMS.draft.checkBase(d.version);
-      const site = ((d.daemons || {}).engined || {}).site || {};
+      const site = ((d.scopes || {}).pretzel || {}).site || {};
       deployed = (Array.isArray(site.sites) ? site.sites : []).map(normalize);
     } catch (_) { deployed = []; }
     const staged = window.NMS.draft.get(DRAFT_KEY, null);
@@ -63,7 +63,7 @@
     refreshPending();
   }
 
-  const commitPayload = () => [{ daemon: 'engined', domain: 'site', values: { sites: state.sites } }];
+  const commitPayload = () => [{ scope: 'pretzel', domain: 'site', values: { sites: state.sites } }];
 
   // ── Staging provider ─────────────────────────────────────────────────────────
   window.NMS.staging.register({

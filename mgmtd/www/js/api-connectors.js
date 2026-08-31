@@ -10,7 +10,7 @@
  * complete request, so two firewalls needing different arguments are two endpoints — which is
  * what makes a PAN-OS upgrade a re-point here rather than an edit everywhere.
  *
- * Committed under collectord.service.api.connectors.
+ * Committed under pretzel.connector.connectors.
  */
 (function () {
   'use strict';
@@ -66,7 +66,7 @@
       if (r.status === 401) { location.href = '/'; return; }
       const d = await r.json();
       window.NMS.draft.checkBase(d.version);
-      const api = ((d.daemons || {}).collectord || {}).api || {};
+      const api = ((d.scopes || {}).pretzel || {}).connector || {};
       deployed = (Array.isArray(api.connectors) ? api.connectors : []).map(normalize);
     } catch (_) { deployed = []; }
     const staged = window.NMS.draft.get(DRAFT_KEY, null);
@@ -74,7 +74,7 @@
     refreshPending();
   }
 
-  const commitPayload = () => [{ daemon: 'collectord', domain: 'api', values: { connectors: state.connectors } }];
+  const commitPayload = () => [{ scope: 'pretzel', domain: 'connector', values: { connectors: state.connectors } }];
 
   window.NMS.staging.register({
     key: DRAFT_KEY,

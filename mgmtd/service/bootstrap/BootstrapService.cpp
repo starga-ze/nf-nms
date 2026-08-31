@@ -4,6 +4,7 @@
 #include "event/MgmtdEventFactory.h"
 #include "router/MgmtdTxRouter.h"
 #include "service/MgmtdServiceManager.h"
+#include "service/ai/AiConfig.h"
 
 #include "ipc/IpcMessage.h"
 #include "ipc/IpcProtocol.h"
@@ -22,7 +23,7 @@ namespace
 
 const nlohmann::json& bootstrapConfig()
 {
-    return pz::config::Config::serviceSection("mgmtd", "bootstrap");
+    return pz::config::Config::section(pz::config::scope::kPretzel, "bootstrap");
 }
 
 std::chrono::milliseconds clientHelloInterval()
@@ -101,7 +102,8 @@ std::unique_ptr<MgmtdEvent> BootstrapService::schedule(std::chrono::steady_clock
     {
         m_state = State::Running;
         LOG_INFO("bootstrap complete (state=Running)");
-        return nullptr;
+        return m_eventFactory->create(MgmtdEventDomain::Bootstrap,
+                                      static_cast<std::uint32_t>(BootstrapEventType::Ready));
     }
 
     case State::Running:
@@ -158,7 +160,17 @@ void BootstrapService::handleEvent(MgmtdServiceManager& serviceManager, const Bo
             return;
         }
 
-        onRuntimeStart(*msg);
+        onRuntimeStart(serviceManager, *msg);
+        break;
+    }
+
+    case BootstrapEventType::Ready:
+    {
+        // Whatever this appliance is configured to serve, handed over as soon as there is a
+        // transport to hand it over on. Fires on every start of this daemon, which is what makes a
+        // lone mgmtd restart deliver the assistant config too — RuntimeStart only arrives when the
+        // whole fleet reconverges.
+        pushAiConfig(serviceManager, "mgmtd ready");
         break;
     }
 
@@ -211,11 +223,18 @@ void BootstrapService::onConfigReloadResponse(MgmtdServiceManager& serviceManage
     {
         LOG_INFO("config reload acknowledged by engined");
         serviceManager.completeReload();
+        pushAiConfig(serviceManager, "settings commit");
         return;
     }
 
     LOG_ERROR("config reload FAILED — the fleet did not converge onto the committed configuration");
     serviceManager.failReload();
+    // Pushed on a failure too, for the reason failReload() invalidates the cache: engined commits
+    // the new running_config BEFORE asking the fleet to converge, so it is the deployed intent
+    // either way. pretzel-ai was never part of that convergence, and withholding the section it
+    // owns because some other daemon stalled would leave the assistant on a configuration nobody
+    // is running any more.
+    pushAiConfig(serviceManager, "settings commit (fleet did not converge)");
 }
 
 void BootstrapService::handleAction(MgmtdServiceManager& serviceManager, const BootstrapAction& action)
@@ -262,11 +281,16 @@ void BootstrapService::onServerHello(MgmtdServiceManager& serviceManager, const 
     LOG_INFO("sent RuntimeReady; handshake complete (state=Ready)");
 }
 
-void BootstrapService::onRuntimeStart(const pz::ipc::IpcMessage& msg)
+void BootstrapService::onRuntimeStart(MgmtdServiceManager& serviceManager, const pz::ipc::IpcMessage& msg)
 {
     (void)msg;
 
-    LOG_TRACE("RuntimeStart ignored (mgmtd is not gated on fleet convergence)");
+    // mgmtd is not gated on fleet convergence, so RuntimeStart decides nothing here. It is still
+    // the right moment to hand the assistant its deployment: it is the first point at which the
+    // running config this appliance booted onto is known to be the one everyone agreed on, and
+    // pretzel-ai — being off the IPC fabric — was not among those who converged onto it.
+    LOG_TRACE("RuntimeStart: not gated on it, but it is when the assistant's config is due");
+    pushAiConfig(serviceManager, "fleet runtime start");
 }
 
 bool BootstrapService::checkTimeout(std::chrono::steady_clock::time_point now, const char* stateName)

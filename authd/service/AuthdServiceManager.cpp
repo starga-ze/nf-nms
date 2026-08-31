@@ -23,16 +23,9 @@ void AuthdServiceManager::start()
     m_bootstrapService->start();
 }
 
-void AuthdServiceManager::configure(const nlohmann::json& config)
+void AuthdServiceManager::configure(const nlohmann::json& authConfig)
 {
-    if (config.contains("service") && config["service"].contains("auth"))
-    {
-        m_authService->configure(config["service"]["auth"]);
-    }
-    else
-    {
-        m_authService->configure(nlohmann::json::object());
-    }
+    m_authService->configure(authConfig.is_object() ? authConfig : nlohmann::json::object());
 }
 
 void AuthdServiceManager::schedule()

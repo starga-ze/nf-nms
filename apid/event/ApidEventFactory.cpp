@@ -2,6 +2,7 @@
 
 #include "service/bootstrap/BootstrapEvent.h"
 #include "service/heartbeat/HeartbeatEvent.h"
+#include "service/reload/ReloadEvent.h"
 
 #include "util/Logger.h"
 
@@ -47,6 +48,9 @@ std::unique_ptr<ApidEvent> ApidEventFactory::create(std::unique_ptr<pz::ipc::Ipc
 
     case pz::ipc::IpcCmd::HeartbeatRequest:
         return std::make_unique<HeartbeatEvent>(HeartbeatEventType::ReceiveHeartbeatRequest, std::move(msg));
+
+    case pz::ipc::IpcCmd::ConfigApply:
+        return std::make_unique<ReloadEvent>(ReloadEventType::ReceiveConfigReload);
 
     default:
         LOG_WARN("unhandled cmd (cmd={})", static_cast<int>(msg->getCmd()));

@@ -10,25 +10,6 @@ AuthdCore::AuthdCore() : Core("authd")
 
 bool AuthdCore::onInit()
 {
-    const auto& cfg = m_config.json();
-
-    const auto& log = cfg["system"]["logger"];
-    m_loggerConfig.name = log["name"];
-    m_loggerConfig.file = log["file"];
-    m_loggerConfig.maxFileSize = log["max_file_size"];
-    m_loggerConfig.maxFiles = log["max_files"];
-
-    const auto& ipc = cfg["system"]["ipc"];
-
-    m_ipcConfig.socketPath = ipc["socket_path"];
-    m_ipcConfig.maxConnections = ipc["max_connections"];
-    m_ipcConfig.maxFrameSize = ipc["max_frame_size"];
-    m_ipcConfig.rxBufferSize = ipc["rx_buffer_size"];
-    m_ipcConfig.txBufferSize = ipc["tx_buffer_size"];
-
-    pz::util::Logger::Init(m_loggerConfig.name, m_loggerConfig.file, m_loggerConfig.maxFileSize,
-                           m_loggerConfig.maxFiles);
-
     LOG_INFO("authd: starting up");
 
     m_threadManager = std::make_unique<pz::util::ThreadManager>();
@@ -38,7 +19,7 @@ bool AuthdCore::onInit()
         return false;
     }
 
-    m_ipcClient = std::make_unique<pz::ipc::IpcClient>(m_ipcConfig, pz::ipc::IpcDaemon::Authd);
+    m_ipcClient = std::make_unique<pz::ipc::IpcClient>(ipcConfig(), pz::ipc::IpcDaemon::Authd);
 
     if (!m_ipcClient->init())
     {
@@ -67,7 +48,7 @@ bool AuthdCore::onInit()
         return false;
     }
 
-    m_serviceManager->configure(cfg);
+    m_serviceManager->configure(pz::config::Config::section(pz::config::scope::kPretzel, "auth"));
 
     m_process = std::make_unique<AuthdProcess>(m_ipcClient.get(), m_serviceManager.get());
 

@@ -180,7 +180,7 @@ nlohmann::json TopologyService::compose(const std::string& siteOid)
         out["generated_at"] = "";
     }
 
-    const auto& site = pz::config::Config::serviceSection("engined", "site");
+    const auto& site = pz::config::Config::section(pz::config::scope::kPretzel, "site");
     for (const auto& s : site.value("sites", json::array()))
     {
         if (!s.is_object())
@@ -209,7 +209,7 @@ namespace
 std::unordered_map<std::string, std::string> siteNames()
 {
     std::unordered_map<std::string, std::string> out;
-    for (const auto& s : pz::config::Config::serviceSection("engined", "site").value("sites", json::array()))
+    for (const auto& s : pz::config::Config::section(pz::config::scope::kPretzel, "site").value("sites", json::array()))
     {
         if (!s.is_object())
             continue;
@@ -264,7 +264,7 @@ struct Stream
 std::vector<Stream> streamsForDevice(const std::string& deviceOid)
 {
     std::vector<Stream> out;
-    const auto& api = pz::config::Config::serviceSection("collectord", "api");
+    const auto& api = pz::config::Config::section(pz::config::scope::kPretzel, "connector");
 
     std::unordered_map<std::string, json> endpoints;
     for (const auto& e : api.value("endpoints", json::array()))
@@ -349,7 +349,7 @@ nlohmann::json TopologyService::composeSase(const std::string& siteOid, const Sa
 
     // Config is the list of declared tenants; the table adds the runtime state. A tenant declared but
     // never probed still belongs in the picture — its absence is a finding, not a reason to hide it.
-    const auto& site = pz::config::Config::serviceSection("engined", "site");
+    const auto& site = pz::config::Config::section(pz::config::scope::kPretzel, "site");
     for (const auto& d : site.value("sase_devices", json::array()))
     {
         if (!d.is_object())
@@ -483,7 +483,7 @@ nlohmann::json TopologyService::composeNgfw(const std::string& siteOid, const Sa
         LOG_WARN("could not read ngfw_device: {}", e.what());
     }
 
-    const auto& site = pz::config::Config::serviceSection("engined", "site");
+    const auto& site = pz::config::Config::section(pz::config::scope::kPretzel, "site");
     for (const auto& d : site.value("ngfw_devices", json::array()))
     {
         if (!d.is_object())

@@ -128,7 +128,7 @@ void StatusController::tick(std::chrono::steady_clock::time_point now, const Api
         sm.txRouter().handleIpcMessage(std::move(msg));
     }
 
-    const auto& site = pz::config::Config::serviceSection("engined", "site");
+    const auto& site = pz::config::Config::section(pz::config::scope::kPretzel, "site");
     const auto devices = site.value("sase_devices", json::array());
 
     for (const auto& d : devices)

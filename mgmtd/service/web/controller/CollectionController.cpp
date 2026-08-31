@@ -147,8 +147,8 @@ void CollectionController::overview(MgmtdServiceManager& sm, const pz::http::Htt
         auto& db = pz::db::Database::instance();
 
         // ── The declaration ───────────────────────────────────────────────────────────────────
-        const auto& site = pz::config::Config::serviceSection("engined", "site");
-        const auto& api = pz::config::Config::serviceSection("collectord", "api");
+        const auto& site = pz::config::Config::section(pz::config::scope::kPretzel, "site");
+        const auto& api = pz::config::Config::section(pz::config::scope::kPretzel, "connector");
 
         std::unordered_map<std::string, std::string> siteName;
         for (const auto& s : site.value("sites", json::array()))

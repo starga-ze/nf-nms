@@ -10,25 +10,6 @@ IpcdCore::IpcdCore() : Core("ipcd")
 
 bool IpcdCore::onInit()
 {
-    const auto& cfg = m_config.json();
-
-    const auto& log = cfg["system"]["logger"];
-    m_loggerConfig.name = log["name"];
-    m_loggerConfig.file = log["file"];
-    m_loggerConfig.maxFileSize = log["max_file_size"];
-    m_loggerConfig.maxFiles = log["max_files"];
-
-    const auto& ipc = cfg["system"]["ipc"];
-
-    m_ipcConfig.socketPath = ipc["socket_path"];
-    m_ipcConfig.maxConnections = ipc["max_connections"];
-    m_ipcConfig.maxFrameSize = ipc["max_frame_size"];
-    m_ipcConfig.rxBufferSize = ipc["rx_buffer_size"];
-    m_ipcConfig.txBufferSize = ipc["tx_buffer_size"];
-
-    pz::util::Logger::Init(m_loggerConfig.name, m_loggerConfig.file, m_loggerConfig.maxFileSize,
-                           m_loggerConfig.maxFiles);
-
     LOG_INFO("ipcd: starting up");
 
     m_threadManager = std::make_unique<ThreadManager>();
@@ -38,7 +19,7 @@ bool IpcdCore::onInit()
         return false;
     }
 
-    m_ipcServer = std::make_unique<IpcServer>(m_ipcConfig, pz::ipc::IpcDaemon::Ipcd);
+    m_ipcServer = std::make_unique<IpcServer>(ipcConfig(), pz::ipc::IpcDaemon::Ipcd);
     if (!m_ipcServer->init())
     {
         LOG_ERROR("failed to initialize IPC server");

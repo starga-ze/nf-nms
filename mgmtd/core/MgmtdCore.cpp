@@ -29,22 +29,14 @@ MgmtdCore::MgmtdCore() : Core("mgmtd")
 
 bool MgmtdCore::onInit()
 {
-    if (!loadLoggerConfig())
-    {
-        return false;
-    }
-
-    pz::util::Logger::Init(m_loggerConfig.name, m_loggerConfig.file, m_loggerConfig.maxFileSize,
-                           m_loggerConfig.maxFiles);
-
     LOG_INFO("mgmtd: starting up");
 
-    if (!loadIpcConfig() || !loadHttpConfig())
+    if (!loadHttpConfig())
     {
         return false;
     }
 
-    m_ipcClient = std::make_unique<pz::ipc::IpcClient>(m_ipcConfig, pz::ipc::IpcDaemon::Mgmtd);
+    m_ipcClient = std::make_unique<pz::ipc::IpcClient>(ipcConfig(), pz::ipc::IpcDaemon::Mgmtd);
     if (!m_ipcClient->init())
     {
         LOG_WARN("IPC client unavailable — running in metrics-only mode");
@@ -171,59 +163,28 @@ void MgmtdCore::onShutdown()
     pz::util::Logger::Shutdown();
 }
 
-bool MgmtdCore::loadLoggerConfig()
-{
-    const auto& cfg = m_config.json();
-    const auto sys = cfg.value("system", nlohmann::json::object());
-
-    if (!sys.contains("logger"))
-    {
-        m_loggerConfig.name = "pz-mgmtd";
-        m_loggerConfig.file = "/tmp/pz-mgmtd.log";
-        m_loggerConfig.maxFileSize = 5 * 1024 * 1024;
-        m_loggerConfig.maxFiles = 10;
-        return true;
-    }
-
-    const auto& log = sys["logger"];
-    m_loggerConfig.name = log.value("name", "pz-mgmtd");
-    m_loggerConfig.file = log.value("file", "/tmp/pz-mgmtd.log");
-    m_loggerConfig.maxFileSize = log.value("max_file_size", 5 * 1024 * 1024);
-    m_loggerConfig.maxFiles = log.value("max_files", 10);
-    return true;
-}
-
-bool MgmtdCore::loadIpcConfig()
-{
-    const auto& cfg = m_config.json();
-    const auto sys = cfg.value("system", nlohmann::json::object());
-
-    if (!sys.contains("ipc"))
-    {
-        m_ipcConfig.socketPath = "/run/pretzel/ipcd.sock";
-        return true;
-    }
-
-    const auto& ipc = sys["ipc"];
-    m_ipcConfig.socketPath = ipc.value("socket_path", "/run/pretzel/ipcd.sock");
-    m_ipcConfig.maxConnections = ipc.value("max_connections", 128);
-    m_ipcConfig.maxFrameSize = ipc.value("max_frame_size", 65536);
-    m_ipcConfig.rxBufferSize = ipc.value("rx_buffer_size", 65536);
-    m_ipcConfig.txBufferSize = ipc.value("tx_buffer_size", 65536);
-    return true;
-}
-
 bool MgmtdCore::loadHttpConfig()
 {
-    const auto& cfg = m_config.json();
-    const auto svc = cfg.value("service", nlohmann::json::object());
+    // `console` rather than `http`: the appliance has two listeners, and naming them by protocol
+    // left two domains called the same thing in two daemon sections. This one is the web console.
+    const auto& http = pz::config::Config::section(pz::config::scope::kPretzel, "console");
 
-    if (!svc.contains("http"))
+    // Refused, not defaulted. The listener is how an operator reaches this appliance at all, and a
+    // compiled fallback for it is worse than no daemon: mgmtd came up "healthy" on a different port
+    // with TLS off, and the only symptom was that the console had vanished.
+    //
+    // It is absent for one reason in practice — this process read the running config before engined
+    // finished seeding or back-filling it, which is a race the unit ordering cannot close (After=
+    // orders the start, not the readiness). Exiting is the right answer to that: Restart=always
+    // brings mgmtd back in three seconds, by which time the config is there. A daemon that guessed
+    // instead would still be guessing an hour later.
+    if (http.empty())
     {
-        return true;
+        LOG_ERROR("no 'console' domain in the running configuration — refusing to start rather "
+                  "than binding a guessed address. If engined is still seeding, the restart will "
+                  "pick it up");
+        return false;
     }
-
-    const auto& http = svc["http"];
     m_httpConfig.listenAddress = http.value("listen_address", "0.0.0.0");
     m_httpConfig.listenPort = static_cast<std::uint16_t>(http.value("listen_port", 9101));
 

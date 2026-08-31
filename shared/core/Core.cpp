@@ -28,11 +28,12 @@ void Core::run()
 
     onPreConfigLoad();
 
-    if (!m_config.load(m_name))
-    {
-        std::cerr << "config load failed for " << m_name << std::endl;
-        return;
-    }
+    loadInfraConfig();
+
+    // Before onInit, so a subclass's very first LOG_ line has somewhere to go. It used to be the
+    // first thing every onInit did, which meant anything that failed ahead of it failed silently.
+    pz::util::Logger::Init(m_loggerConfig.name, m_loggerConfig.file, m_loggerConfig.maxFileSize,
+                           m_loggerConfig.maxFiles);
 
     writePidFile();
 
@@ -47,6 +48,44 @@ void Core::run()
     onShutdown();
 
     removePidFile();
+}
+
+// Everything a daemon needs before it can say anything, derived rather than declared.
+//
+// The name is the only input. `pz-<name>` is the process name, `<dir>/<name>.log` the log file —
+// both were written out per daemon in the config until they were nine chances to point a daemon at
+// another one's file. What remains in the document is what genuinely differs between deployments:
+// where the logs go, how big they get, and where the IPC socket is.
+void Core::loadInfraConfig()
+{
+    const auto& logger = pz::config::Config::section(pz::config::scope::kGlobal, "logger");
+    const auto& ipc = pz::config::Config::section(pz::config::scope::kGlobal, "ipc");
+
+    m_loggerConfig.name = "pz-" + m_name;
+    m_loggerConfig.file = logger.value("dir", std::string("/var/log/pretzel")) + "/" + m_name + ".log";
+    m_loggerConfig.maxFileSize = logger.value("max_file_size", 5u * 1024u * 1024u);
+    m_loggerConfig.maxFiles = logger.value("max_files", 100u);
+
+    m_ipcConfig.socketPath = ipc.value("socket_path", std::string("/run/pretzel/ipcd.sock"));
+    m_ipcConfig.maxConnections = ipc.value("max_connections", m_ipcConfig.maxConnections);
+    m_ipcConfig.maxFrameSize = ipc.value("max_frame_size", m_ipcConfig.maxFrameSize);
+    m_ipcConfig.rxBufferSize = ipc.value("rx_buffer_size", m_ipcConfig.rxBufferSize);
+    m_ipcConfig.txBufferSize = ipc.value("tx_buffer_size", m_ipcConfig.txBufferSize);
+}
+
+const std::string& Core::name() const
+{
+    return m_name;
+}
+
+const pz::config::LoggerConfig& Core::loggerConfig() const
+{
+    return m_loggerConfig;
+}
+
+const pz::config::IpcConfig& Core::ipcConfig() const
+{
+    return m_ipcConfig;
 }
 
 void Core::handleSignal()

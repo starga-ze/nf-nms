@@ -1,223 +1,113 @@
 {
-    "//": "Committed baseline boot config for all pretzel daemons. Safe to commit: it",
-    "//secrets": "carries NO secrets. The DB 'database.password' is injected at deploy",
-    "//database": "time from PZ_PG_PASSWORD (script/utils.py -> script/start.py); the admin",
-    "//admin": "login lives hashed in the local_users table (engined seeds a default and",
-    "//admin2": "applies changes), NOT here; SNMP v3 credentials are entered via the mgmtd",
-    "//snmp": "web UI at runtime (stored in running_config, not here).",
-    "//tiers": "This baseline carries only (a) infrastructure that cannot live in the DB",
-    "//tiers2": "(ipc/logger/http/db/SAML) and (b) operator-facing config seeded for the UI",
-    "//tiers3": "(sites + devices, icmp excluded_ips/timeouts, snmp community, collectord API keys",
-    "//tiers3b": "+ endpoints + connectors, racks). Internal",
-    "//tiers4": "tuning (heartbeat/bootstrap/probe-batch/scan-timeouts) is NOT here — each",
-    "//tiers5": "daemon reads it via config.value(key, <compiled default>), so it is owned",
-    "//tiers6": "by the code defaults and never surfaces in the settings UI.",
+    "//": "Committed baseline boot config. Safe to commit: it carries NO secrets. The DB",
+    "//secrets": "'database.password' is injected at deploy time from PZ_PG_PASSWORD",
+    "//secrets2": "(script/utils.py -> script/start.py); the admin login lives hashed in the",
+    "//secrets3": "local_users table (engined seeds a default and applies changes), NOT here;",
+    "//secrets4": "SNMP v3 and vendor API credentials are entered via the web UI at runtime and",
+    "//secrets5": "held sealed in their own tables, never in this document.",
+    "//shape": "Three scopes, and the split is about ownership rather than about processes:",
+    "//shape2": "  global      infrastructure every daemon shares. Not operator-facing.",
+    "//shape3": "  pretzel     the appliance, addressed by DOMAIN - what is being configured,",
+    "//shape4": "              not which daemon happens to read it. Which one does is a fact",
+    "//shape5": "              about the code, and it has already changed twice (probed to",
+    "//shape6": "              collectord, inferd to pretzel-ai) without one operator's intent",
+    "//shape7": "              changing with it. Each of those moved config nobody had edited.",
+    "//shape8": "  pretzel-ai  the assistant, a separate service reached over gRPC. Its own",
+    "//shape9": "              scope because it deploys and versions on its own clock.",
+    "//derived": "What is NOT here, deliberately: daemon_name, and per-daemon logger name and",
+    "//derived2": "file. They were nine copies of one sentence, each derivable from the daemon's",
+    "//derived3": "own name, and every copy a place for a typo to become a daemon logging to the",
+    "//derived4": "wrong file. shared/core/Core.cpp derives all three from the name it already has.",
+    "//tuning": "Internal tuning (heartbeat, bootstrap, probe batching, scan timeouts) is not",
+    "//tuning2": "here either - each daemon reads it via config.value(key, <compiled default>),",
+    "//tuning3": "so it is owned by the code defaults and never surfaces in the settings UI.",
+    "//assistant": "pretzel-ai ships with NO providers. A provider exists because an operator added",
+    "//assistant2": "one: it is a vendor they hold an account with, a key only they have, and the",
+    "//assistant3": "models that account is entitled to. A factory baseline cannot know any of the",
+    "//assistant4": "three, and one that guessed would show a configuration nobody made.",
+    "//assistant5": "An entry is { id, models[] } and nothing else. The endpoint is not configuration -",
+    "//assistant6": "it is a fact about the vendor, compiled in on the pretzel-ai side, so an operator",
+    "//assistant7": "cannot point 'openai' at something that is not OpenAI. The API key is not here",
+    "//assistant8": "either: it is sealed in ai_gateway_credential_state under the provider's own id.",
     "global": {
-        "system": {
-            "ipc": {
-                "socket_path": "/run/pretzel/ipcd.sock",
-                "max_connections": 128,
-                "max_frame_size": 1048576,
-                "rx_buffer_size": 1048576,
-                "tx_buffer_size": 1048576,
-                "ipc_retry_attempts": 10,
-                "ipc_retry_delay_ms": 1000
-            },
-            "logger": {
-                "max_file_size": 5242880,
-                "max_files": 100
-            }
+        "ipc": {
+            "socket_path": "/run/pretzel/ipcd.sock",
+            "max_connections": 128,
+            "max_frame_size": 1048576,
+            "rx_buffer_size": 1048576,
+            "tx_buffer_size": 1048576,
+            "ipc_retry_attempts": 10,
+            "ipc_retry_delay_ms": 1000
+        },
+        "logger": {
+            "dir": "/var/log/pretzel",
+            "max_file_size": 5242880,
+            "max_files": 100
         }
     },
-    "engined": {
-        "daemon_name": "pz-engined",
-        "system": {
-            "logger": {
-                "name": "pz-engined",
-                "file": "/var/log/pretzel/engined.log"
+    "pretzel": {
+        "console": {
+            "listen_address": "0.0.0.0",
+            "listen_port": 443,
+            "tls_enabled": true,
+            "cert_file": "/etc/pretzel/cert/server.crt",
+            "key_file": "/etc/pretzel/cert/server.key"
+        },
+        "api": {
+            "listen_address": "0.0.0.0",
+            "listen_port": 8443,
+            "tls_enabled": false
+        },
+        "database": {
+            "host": "127.0.0.1",
+            "port": 5432,
+            "name": "pretzel",
+            "user": "pretzel"
+        },
+        "auth": {
+            "method": "saml",
+            "saml": {
+                "enabled": false,
+                "idp_sso_url": "",
+                "idp_entity_id": "",
+                "idp_cert_pem": "",
+                "sp_entity_id": "https://pretzel.example.com/saml/metadata",
+                "acs_url": "https://pretzel.example.com/api/auth/saml/acs",
+                "admin_group": "",
+                "groups_attr": "groups",
+                "email_attr": "",
+                "clock_skew_sec": 120
             }
         },
-        "service": {
-            "rack": {
-                "racks": []
-            },
-            "site": {
-                "sites": [],
-                "ngfw_devices": [],
-                "sase_devices": []
-            }
+        "router": {
+            "allow_unknown_dst": false
+        },
+        "site": {
+            "sites": [],
+            "ngfw_devices": [],
+            "sase_devices": []
+        },
+        "rack": {
+            "racks": []
+        },
+        "probe": {
+            "excluded_ips": "127.0.0.1",
+            "icmp_timeout_ms": 1000,
+            "icmp_retries": 2
+        },
+        "scan": {
+            "community": "public",
+            "v3_devices": []
+        },
+        "connector": {
+            "api_credentials": [],
+            "endpoints": [],
+            "connectors": []
         }
     },
-    "authd": {
-        "daemon_name": "pz-authd",
-        "system": {
-            "logger": {
-                "name": "pz-authd",
-                "file": "/var/log/pretzel/authd.log"
-            }
-        },
-        "service": {
-            "auth": {
-                "method": "saml",
-                "//saml": "Placeholders. The IdP values come from your own identity provider's",
-                "//saml2": "metadata, and sp_entity_id/acs_url must carry the address this",
-                "//saml3": "appliance is actually reached on. Fill them in and set enabled=true,",
-                "//saml4": "or leave this off and sign in with a local account.",
-                "saml": {
-                    "enabled": false,
-                    "idp_sso_url": "",
-                    "idp_entity_id": "",
-                    "idp_cert_pem": "",
-                    "sp_entity_id": "https://pretzel.example.com/saml/metadata",
-                    "acs_url": "https://pretzel.example.com/api/auth/saml/acs",
-                    "admin_group": "",
-                    "groups_attr": "groups",
-                    "email_attr": "",
-                    "clock_skew_sec": 120
-                }
-            }
-        }
-    },
-    "probed": {
-        "daemon_name": "pz-probed",
-        "system": {
-            "logger": {
-                "name": "pz-probed",
-                "file": "/var/log/pretzel/probed.log"
-            }
-        },
-        "service": {
-            "probe": {
-                "excluded_ips": "127.0.0.1",
-                "icmp_timeout_ms": 1000,
-                "icmp_retries": 2
-            }
-        }
-    },
-    "ipcd": {
-        "daemon_name": "pz-ipcd",
-        "system": {
-            "logger": {
-                "name": "pz-ipcd",
-                "file": "/var/log/pretzel/ipcd.log"
-            }
-        },
-        "service": {
-            "router": {
-                "allow_unknown_dst": false
-            }
-        }
-    },
-    "mgmtd": {
-        "daemon_name": "pz-mgmtd",
-        "system": {
-            "logger": {
-                "name": "pz-mgmtd",
-                "file": "/var/log/pretzel/mgmtd.log",
-                "max_files": 10
-            }
-        },
-        "service": {
-            "http": {
-                "listen_address": "0.0.0.0",
-                "listen_port": 443,
-                "tls_enabled": true,
-                "cert_file": "/etc/pretzel/cert/server.crt",
-                "key_file": "/etc/pretzel/cert/server.key"
-            },
-            "database": {
-                "host": "127.0.0.1",
-                "port": 5432,
-                "name": "pretzel",
-                "user": "pretzel"
-            }
-        }
-    },
-    "collectord": {
-        "daemon_name": "pz-collectord",
-        "system": {
-            "logger": {
-                "name": "pz-collectord",
-                "file": "/var/log/pretzel/collectord.log"
-            }
-        },
-        "service": {
-            "scan": {
-                "community": "public",
-                "v3_devices": []
-            },
-            "api": {
-                "api_credentials": [],
-                "endpoints": [],
-                "connectors": []
-            }
-        }
-    },
-    "topologyd": {
-        "daemon_name": "pz-topologyd",
-        "system": {
-            "logger": {
-                "name": "pz-topologyd",
-                "file": "/var/log/pretzel/topologyd.log"
-            }
-        },
-        "service": {}
-    },
-    "apid": {
-        "daemon_name": "pz-apid",
-        "system": {
-            "logger": {
-                "name": "pz-apid",
-                "file": "/var/log/pretzel/apid.log"
-            }
-        },
-        "service": {
-            "http": {
-                "listen_address": "0.0.0.0",
-                "listen_port": 8443,
-                "tls_enabled": false
-            }
-        }
-    },
-    "//pretzel-ai": "The inference service. Not an IPC daemon — it is reached over gRPC — but its",
-    "//pretzel-ai2": "deployment is operator-declared and versioned like everything else here.",
-    "//pretzel-ai3": "route.llm decides who serves the completion, route.guardrail who owns the",
-    "//pretzel-ai4": "inspection; the two are independent. NO KEYS: the gateway subscription key is",
-    "//pretzel-ai5": "held sealed in ai_gateway_credential_state, and the model catalog is read back",
-    "//pretzel-ai6": "over ListModels rather than declared.",
     "pretzel-ai": {
-        "daemon_name": "pz-pretzel-ai",
-        "service": {
-            "route": {
-                "llm": "gateway",
-                "guardrail": "gateway",
-                "require_guardrail": false
-            },
-            "gateway": {
-                "id": "portkey",
-                "host": "aigw.portkey.ai",
-                "port": 443,
-                "tls": true,
-                "path": "/v1/chat/completions",
-                "default_model": "@openai/gpt-4o-2024-11-20",
-                "system_prompt": "You are the internal assistant for this company. Answer in the language the user writes in. If you do not know, say so rather than guessing.",
-                "max_tokens": 512,
-                "timeout_sec": 45
-            },
-            "airs": {
-                "endpoint": "https://service.api.aisecurity.paloaltonetworks.com",
-                "profile_name": "AIRS_Security_Profile",
-                "profile_id": "",
-                "timeout_sec": 30,
-                "fail_open": false
-            },
-            "providers": {
-                "list": [
-                    { "id": "openai",    "url": "https://api.openai.com/v1/chat/completions" },
-                    { "id": "anthropic", "url": "https://api.anthropic.com/v1/chat/completions" },
-                    { "id": "google",    "url": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions" }
-                ]
-            }
+        "providers": {
+            "list": []
         }
     }
 }

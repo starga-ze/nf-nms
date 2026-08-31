@@ -60,10 +60,6 @@ const char* IpcProtocol::daemonToStr(IpcDaemon daemon) noexcept
         return "mgmtd";
     case IpcDaemon::Apid:
         return "apid";
-    case IpcDaemon::Inferd:
-        return "inferd";
-    case IpcDaemon::Ragd:
-        return "ragd";
     case IpcDaemon::Broadcast:
         return "broadcast";
     default:
@@ -127,12 +123,8 @@ const char* IpcProtocol::cmdToStr(IpcCmd cmd) noexcept
         return "ApiSaseKeyStoreRequest";
     case IpcCmd::ApiCredentialStoreRequest:
         return "ApiCredentialStoreRequest";
-    case IpcCmd::GatewayCredentialStoreRequest:
-        return "GatewayCredentialStoreRequest";
-    case IpcCmd::GatewayCredentialStoreResponse:
-        return "GatewayCredentialStoreResponse";
-    case IpcCmd::GatewayCredentialStateUpdate:
-        return "GatewayCredentialStateUpdate";
+    case IpcCmd::AiCredentialStateUpdate:
+        return "AiCredentialStateUpdate";
     case IpcCmd::ApiConnectorTestResponse:
         return "ApiConnectorTestResponse";
     case IpcCmd::ApiCredentialStateRequest:
@@ -208,8 +200,6 @@ CmdCategory IpcProtocol::classify(IpcCmd cmd) noexcept
     case IpcCmd::ApiTlsProbeRequest:
     case IpcCmd::ApiSaseKeyStoreRequest:
     case IpcCmd::ApiCredentialStoreRequest:
-    case IpcCmd::GatewayCredentialStoreRequest:
-    case IpcCmd::GatewayCredentialStoreResponse:
     case IpcCmd::ApiConnectorTestResponse:
         return CmdCategory::DeviceOp;
 
@@ -219,7 +209,7 @@ CmdCategory IpcProtocol::classify(IpcCmd cmd) noexcept
     case IpcCmd::ProbeResult:
     case IpcCmd::ScanResult:
     case IpcCmd::ApiCredentialStateUpdate:
-    case IpcCmd::GatewayCredentialStateUpdate:
+    case IpcCmd::AiCredentialStateUpdate:
     case IpcCmd::ApiCollectionSample:
     case IpcCmd::SaseApiKeyUpdate:
     case IpcCmd::SaseHealthResult:
@@ -341,11 +331,6 @@ pz::ipc::IpcDaemon IpcProtocol::strToDaemon(const std::string& daemon) noexcept
     if (daemon == "mgmtd")
     {
         return IpcDaemon::Mgmtd;
-    }
-
-    if (daemon == "inferd")
-    {
-        return IpcDaemon::Inferd;
     }
 
     if (daemon == "apid")

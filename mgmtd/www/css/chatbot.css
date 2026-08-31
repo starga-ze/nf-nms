@@ -48,16 +48,85 @@ body.page-chatbot .content-body {
 }
 .chat-rail.is-hidden { width: 0; border-right-color: transparent; overflow: hidden; }
 
-.chat-rail-h { padding: 11px 11px 8px; }
-.chat-new {
-  width: 100%;
-  display: flex; align-items: center; justify-content: center; gap: 7px;
-  font: inherit; font-size: 12px; font-weight: 600;
-  color: #fff; background: var(--accent);
-  border: none; border-radius: 9px; padding: 8px 10px; cursor: pointer;
-  transition: opacity var(--tr);
+.chat-rail-h { padding: 11px 11px 8px; display: flex; flex-direction: column; gap: 9px; }
+
+/* ── Mode ──────────────────────────────────────────────────────────────────────────────────────
+   Chat and Agent are different services, not a filter over one list, so the control that switches
+   them is a segmented track rather than a dropdown: both options stay visible and the current one
+   is a position, which is the fastest thing to read in a rail this narrow. */
+/* One surface, not two. The earlier version drew a bordered track and then an inset-bordered
+   slide inside it — two rectangles a pixel apart, which is the nesting that made it look heavy in
+   a rail this narrow. Now the track is a plain tint with no border, and the moving piece is the
+   only thing with an edge. */
+.chat-mode {
+  position: relative; display: grid; grid-template-columns: 1fr 1fr;
+  padding: 2px; border-radius: 8px;
+  background: var(--surface-2, var(--surface));
 }
-.chat-new:hover { opacity: .88; }
+/* Transformed rather than re-laid-out: the travel runs on the compositor and cannot jitter the
+   labels it passes under. */
+.chat-mode-slide {
+  position: absolute; top: 2px; left: 2px; bottom: 2px; width: calc(50% - 2px);
+  border-radius: 6px; background: var(--surface);
+  box-shadow: 0 1px 2px rgba(15,23,42,.07);
+  transition: transform var(--tr);
+}
+.chat-mode-b {
+  position: relative; z-index: 1;
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 6px 0; border: none; background: none; cursor: pointer;
+  font-size: 11.5px; font-weight: 500; color: var(--text-muted);
+  transition: color var(--tr);
+}
+.chat-mode-b svg { width: 13px; height: 13px; flex: none; }
+.chat-mode-b:hover { color: var(--text-secondary); }
+.chat-mode-b.on { color: var(--text); font-weight: 600; }
+
+/* ── New ───────────────────────────────────────────────────────────────────────────────────────
+   A split button: the wide half starts a session on the model last used, the caret says which
+   model to start it on instead. The common case stays one click and the choice is one more. */
+/* Quiet, and one pair. The rail's job is the session list; Home and New are how you move around
+   it, not what the eye should land on first — so they share one rule rather than one of them
+   carrying an accent fill that made it the loudest thing in the column. */
+.chat-rail-nav { display: flex; flex-direction: column; gap: 1px; }
+.chat-new-wrap { position: relative; display: flex; }
+
+.chat-new-menu {
+  position: absolute; top: calc(100% + 5px); left: 0; right: 0; z-index: 40;
+  padding: 5px; border-radius: 10px;
+  background: var(--surface); border: 1px solid var(--border);
+  box-shadow: 0 12px 32px rgba(15,23,42,.14), 0 2px 8px rgba(15,23,42,.06);
+  display: none;
+}
+.chat-new-menu.open { display: block; }
+.chat-new-menu-h {
+  padding: 4px 8px 6px; font-size: 10px; font-weight: 700;
+  letter-spacing: .04em; text-transform: uppercase; color: var(--text-muted);
+}
+.chat-new-menu-i {
+  display: flex; align-items: baseline; gap: 8px; width: 100%;
+  padding: 7px 8px; border: none; border-radius: 7px; background: none;
+  cursor: pointer; text-align: left; color: var(--text);
+}
+.chat-new-menu-i:hover { background: var(--surface-hover); }
+.chat-new-menu-i.on { background: var(--sb-active-bg, var(--surface-2)); }
+.chat-new-menu-l { font-size: 12px; font-weight: 600; }
+.chat-new-menu-p { font-size: 10.5px; color: var(--text-muted); margin-left: auto; }
+
+/* One line, muted. It is a note about why the column is bare, not content to read. */
+.chat-rail-empty {
+  padding: 14px 10px; font-size: 11px; color: var(--text-muted); line-height: 1.5;
+}
+.chat-home, .chat-new {
+  width: 100%;
+  display: flex; align-items: center; gap: 7px;
+  padding: 6px 9px; border: none; border-radius: 7px; background: none; cursor: pointer;
+  font: inherit; font-size: 11.5px; font-weight: 500;
+  color: var(--text-muted); text-align: left;
+  transition: background var(--tr), color var(--tr);
+}
+.chat-home:hover, .chat-new:hover { background: var(--surface-hover); color: var(--text); }
+.chat-home svg, .chat-new svg { width: 13px; height: 13px; flex: none; }
 .chat-new svg { width: 14px; height: 14px; stroke-width: 2.4; }
 
 .chat-rail-list {
@@ -68,18 +137,41 @@ body.page-chatbot .content-body {
 .chat-rail-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
 
 .chat-rail-sec {
+  display: flex; align-items: center; gap: 8px;
   font-size: 9px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase;
   color: var(--text-muted); padding: 10px 6px 5px;
 }
+/* Behind a click, like the row actions: a permanently visible "delete everything" is a
+   permanently available mistake. Revealed on hover of the list it acts on. */
+.chat-sec-x {
+  margin-left: auto; border: none; background: none; cursor: pointer;
+  padding: 1px; border-radius: 5px; line-height: 0; color: var(--text-muted);
+  opacity: 0; transition: opacity var(--tr), color var(--tr), background var(--tr);
+}
+.chat-rail-list:hover .chat-sec-x,
+.chat-sec-x[aria-expanded="true"] { opacity: 1; }
+.chat-sec-x:hover { color: var(--text); background: var(--surface-2); }
+.chat-sec-x svg { width: 14px; height: 14px; stroke-width: 2; }
+/* Two lines now: what the session is, and — smaller — when it started and what answers it. Both
+   are what an operator actually scans a rail for ("the one from this morning", "the one on the big
+   model"), and neither survives in a title that is usually just the first thing they typed. */
 .chat-convo {
   display: flex; align-items: center; gap: 6px;
-  padding: 7px 8px; border-radius: 8px; cursor: pointer;
+  padding: 5px 8px; border-radius: 7px; cursor: pointer;
   color: var(--text-secondary); transition: background var(--tr), color var(--tr);
 }
+.chat-convo-b { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .chat-convo:hover { background: var(--surface-hover); color: var(--text); }
 .chat-convo.active { background: var(--sb-active-bg); color: var(--text); }
 .chat-convo-t {
-  flex: 1 1 auto; min-width: 0; font-size: 12px; font-weight: 500;
+  display: flex; align-items: center; gap: 6px; min-width: 0;
+  font-size: 12px; font-weight: 500;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+/* Muted and one step down, so it reads as an annotation on the title rather than a second title.
+   It stays legible on the active row, where the background changes but the hierarchy must not. */
+.chat-convo-s {
+  font-size: 10px; color: var(--text-muted); min-width: 0; line-height: 1.35;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 /* A blocked turn anywhere in the thread leaves a mark on the list entry — the reason to come back
@@ -89,34 +181,35 @@ body.page-chatbot .content-body {
   flex: 0 0 auto; border: none; background: none; cursor: pointer; padding: 2px;
   color: var(--text-muted); line-height: 0; opacity: 0; transition: opacity var(--tr), color var(--tr);
 }
-.chat-convo:hover .chat-convo-x { opacity: 1; }
-.chat-convo-x:hover { color: var(--red); }
-.chat-convo-x svg { width: 13px; height: 13px; stroke-width: 2.2; }
+.chat-convo:hover .chat-convo-x,
+.chat-convo-x[aria-expanded="true"] { opacity: 1; }
+.chat-convo-x:hover { color: var(--text); background: var(--surface-2); }
+.chat-convo-x { border-radius: 5px; }
+.chat-convo-x svg { width: 14px; height: 14px; stroke-width: 2; }
 
-/* Session counters: what this browser has put through the scanner since it was opened. */
-.chat-rail-f {
-  flex: 0 0 auto; border-top: 1px solid var(--border); padding: 9px 12px 11px;
-  display: flex; flex-direction: column; gap: 5px;
+/* Row actions. Mounted on <body>, so the rail's scroll container cannot crop it. */
+.chat-rmenu {
+  position: absolute; top: 0; left: 0; z-index: 320; min-width: 132px; padding: 4px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 9px;
+  box-shadow: 0 12px 32px rgba(15,23,42,.14), 0 2px 8px rgba(15,23,42,.06);
+  display: none;
 }
-.chat-stat { display: flex; align-items: baseline; gap: 6px; font-size: 10.5px; color: var(--text-muted); }
-.chat-stat b { font-size: 11.5px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
-.chat-stat.is-block b { color: var(--red); }
-.chat-stat.is-mask  b { color: var(--orange); }
-.chat-stat.is-flag  b { color: var(--ink-amber); }
+.chat-rmenu.open { display: block; }
+.chat-rmenu-i {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 7px 9px; border: none; border-radius: 6px; background: none;
+  cursor: pointer; text-align: left; color: var(--text); font-size: 12px;
+}
+.chat-rmenu-i:hover { background: var(--surface-hover); }
+.chat-rmenu-i svg { width: 13px; height: 13px; flex: none; }
+.chat-rmenu-i.is-danger { color: var(--red); }
+.chat-rmenu-i.is-danger:hover { background: var(--tint-red); }
 
 /* ── Main column ────────────────────────────────────────────────────────────── */
 .chat-main {
   flex: 1 1 auto; display: flex; flex-direction: column; min-width: 0; min-height: 0;
 }
 
-/* Control strip — same vocabulary as the Insight pages' strip, so the console reads as one app. */
-.chat-bar {
-  flex: 0 0 auto;
-  display: flex; align-items: center; gap: 9px; flex-wrap: wrap;
-  padding: 7px 14px;
-  background: var(--surface); border-bottom: 1px solid var(--border);
-}
-.chat-bar-spacer { flex: 1 1 auto; }
 .chat-icon-btn {
   border: 1px solid var(--border); background: var(--surface-2); border-radius: 7px;
   color: var(--text-muted); cursor: pointer; padding: 4px; line-height: 0;
@@ -301,6 +394,106 @@ body.page-chatbot .content-body {
 .mp-dot[data-p="azure-openai"] { background: var(--blue); }
 .mp-dot[data-p="bedrock"]   { background: var(--orange); }
 
+/* ── Session header ────────────────────────────────────────────────────────────────────────────
+   What this thread is, once, at the top. Quiet enough to be scrolled past and specific enough to
+   answer "which one is this" without opening the rail. */
+/* Fixed height and one type scale in both states: the band holds a title and one line under it
+   whether that line is the model picker or what the session is, so opening a session never moves
+   the thread underneath it. */
+.chat-head {
+  flex: 0 0 auto; width: 100%; min-height: 58px; box-sizing: border-box;
+  padding: 9px 22px; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 16px;
+  text-align: left;
+}
+.chat-head.is-empty { display: none; }
+/* The text takes the room; the picker sits at the far end, where a control that acts on what is
+   about to be typed belongs — out of the reading path of the title beside it. */
+.chat-head-txt { flex: 1 1 auto; display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.chat-head-mp { flex: 0 0 auto; margin-left: auto; }
+/* Anchored to its right edge, so it opens inward. At the left edge of a control that already sits
+   at the right end of the band, a 316px panel hangs off the viewport — and the horizontal overflow
+   that creates is what pulled the header sideways when the picker was opened. */
+.chat-head-mp .mp-panel { left: auto; right: 0; }
+.chat-head-mp[hidden] { display: none; }
+.chat-head-t {
+  font-size: 13.5px; font-weight: 600; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
+}
+/* The mode badge. The glyph is the same one the rail's switch uses, so the two agree without the
+   header having to spell out four words to distinguish one. */
+.chat-head-id { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.chat-head-ic {
+  flex: none; width: 24px; height: 24px; border-radius: 7px;
+  display: grid; place-items: center;
+  background: var(--tint-accent, var(--surface-2)); color: var(--accent);
+}
+.chat-head-ic svg { width: 14px; height: 14px; }
+.chat-head-id .chat-head-t { font-size: 14px; font-weight: 700; }
+.chat-head-m {
+  display: flex; align-items: baseline; gap: 8px;
+  font-size: 10.5px; font-weight: 600; color: var(--text-muted);
+}
+
+.chat-head-w { font-weight: 400; }
+.chat-head-w::before { content: "·"; margin-right: 8px; }
+
+/* ── New-session dialog ────────────────────────────────────────────────────────────────────────
+   Centred and modal: creating a session is a short, deliberate act with four answers, and a
+   popover would have put the two text fields at the edge of a narrow rail. */
+.chat-modal { position: fixed; inset: 0; z-index: 300; display: grid; place-items: center; }
+.chat-modal[hidden] { display: none; }
+.chat-modal-scrim { position: absolute; inset: 0; background: rgba(15,23,42,.38); }
+.chat-modal-card {
+  position: relative; width: min(460px, calc(100vw - 32px));
+  background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+  box-shadow: 0 24px 64px rgba(15,23,42,.22), 0 2px 8px rgba(15,23,42,.08);
+  display: flex; flex-direction: column; max-height: calc(100vh - 64px);
+}
+.chat-modal-h {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 15px 18px 11px; border-bottom: 1px solid var(--border);
+}
+.chat-modal-h h2 { margin: 0; font-size: 14px; font-weight: 700; }
+.chat-modal-x {
+  border: none; background: none; cursor: pointer; line-height: 1;
+  font-size: 20px; color: var(--text-muted); padding: 0 2px;
+}
+.chat-modal-x:hover { color: var(--text); }
+.chat-modal-b { padding: 16px 18px; overflow-y: auto; display: flex; flex-direction: column; gap: 13px; }
+.chat-modal-card.is-narrow { width: min(400px, calc(100vw - 32px)); }
+/* The console's own, not the browser's. confirm() cannot be styled, prints the hostname above
+   whatever it was asked, and on a destructive action looks exactly like the box a page uses to
+   ask for notification permission — which is the box people have learned to dismiss unread. */
+.chat-cf-b { margin: 0; font-size: 12.5px; line-height: 1.6; color: var(--text-secondary); }
+.chat-cf-go {
+  background: var(--red); border-color: transparent; color: #fff; font-weight: 600;
+}
+.chat-cf-go:hover { background: var(--red); opacity: .9; }
+.chat-modal-f {
+  display: flex; justify-content: flex-end; gap: 8px;
+  padding: 12px 18px 15px; border-top: 1px solid var(--border);
+}
+
+.chat-f { display: flex; flex-direction: column; gap: 5px; }
+.chat-f-l {
+  font-size: 11px; font-weight: 600; color: var(--text-secondary);
+  display: flex; align-items: baseline; gap: 6px;
+}
+.chat-f-l em { font-style: normal; font-weight: 400; color: var(--text-muted); font-size: 10.5px; }
+.chat-f input, .chat-f textarea, .chat-f select {
+  width: 100%; padding: 8px 10px; font-size: 12.5px; color: var(--text);
+  background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+  font-family: inherit; resize: vertical;
+}
+.chat-f input:focus, .chat-f textarea:focus { outline: none; border-color: var(--accent); }
+/* The mode is stated, not offered: a session cannot be moved between the two. */
+.chat-f-fixed {
+  padding: 8px 10px; border-radius: 8px; font-size: 12.5px; font-weight: 600;
+  background: var(--surface-2, var(--surface)); border: 1px solid var(--border); color: var(--text);
+}
+.chat-f-note { margin: 0; font-size: 11px; color: var(--text-muted); line-height: 1.55; }
+
 /* ── Thread ─────────────────────────────────────────────────────────────────── */
 .chat-thread {
   flex: 1 1 auto; overflow-y: auto; min-height: 0;
@@ -315,28 +508,36 @@ body.page-chatbot .content-body {
 .chat-col { max-width: 760px; margin: 0 auto; padding: 0 22px; }
 
 .chat-turn { display: flex; flex-direction: column; gap: 5px; margin-bottom: 18px; }
+/* An unbounded answer needs the air a border used to provide, or the next turn crowds it. */
+.chat-turn.is-bot { margin-bottom: 26px; }
 .chat-turn.is-user { align-items: flex-end; }
 
-.chat-who {
-  font-size: 9px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase;
-  color: var(--text-muted); padding: 0 3px;
-}
+
 
 .chat-bubble {
   max-width: 100%;
-  border-radius: 14px; padding: 10px 14px;
   font-size: 13.5px; line-height: 1.62; color: var(--text);
   white-space: pre-wrap; overflow-wrap: anywhere;
 }
+
+/* Asymmetric on purpose, which is where this settled across the tools people use daily. What the
+   person said is a discrete object — short, quotable, worth bounding — so it keeps a bubble and
+   sits right. What the model said is the page: usually long, often structured, and the thing the
+   reader is actually here to read. A container around it adds a second frame inside the one the
+   window already draws, costs horizontal room to padding and borders, and makes a long answer
+   read as a quoted block rather than as prose.
+   The two are still never confusable: one is bounded and right, the other is bare and left. */
 .chat-turn.is-user .chat-bubble {
   background: var(--sb-active-bg);
   border: 1px solid color-mix(in srgb, var(--accent) 26%, transparent);
-  border-bottom-right-radius: 5px;
+  border-radius: 14px; border-bottom-right-radius: 5px;
+  padding: 10px 14px;
   max-width: 82%;
 }
 .chat-turn.is-bot .chat-bubble {
-  background: var(--surface); border: 1px solid var(--border);
-  border-bottom-left-radius: 5px;
+  background: none; border: none; padding: 0;
+  font-size: 14px;          /* a touch larger with nothing around it to set it off */
+  line-height: 1.7;
 }
 .chat-bubble code {
   font-family: var(--font-mono); font-size: 12px;
@@ -361,7 +562,7 @@ body.page-chatbot .content-body {
 .chat-block {
   display: flex; gap: 11px; align-items: flex-start;
   background: var(--tint-red); border: 1px solid color-mix(in srgb, var(--red) 38%, transparent);
-  border-radius: 14px; border-bottom-left-radius: 5px; padding: 11px 14px;
+  border-radius: 12px; padding: 11px 14px;
 }
 .chat-block-ic { flex: 0 0 auto; color: var(--red); line-height: 0; margin-top: 1px; }
 .chat-block-ic svg { width: 17px; height: 17px; stroke-width: 2; }
@@ -381,7 +582,7 @@ body.page-chatbot .content-body {
 .chat-fail {
   display: flex; gap: 11px; align-items: flex-start;
   background: var(--surface); border: 1px dashed var(--border);
-  border-radius: 14px; border-bottom-left-radius: 5px; padding: 11px 14px;
+  border-radius: 12px; padding: 11px 14px;
 }
 .chat-fail-ic { flex: 0 0 auto; color: var(--orange); line-height: 0; margin-top: 1px; }
 .chat-fail-ic svg { width: 17px; height: 17px; stroke-width: 2; }
@@ -447,6 +648,16 @@ body.page-chatbot .content-body {
 
 .chat-caret {
   display: inline-block; width: 6px; height: 14px; margin-left: 2px;
+  background: var(--accent); border-radius: 1px; vertical-align: -2px;
+  animation: chatCaret 1s steps(1) infinite;
+}
+/* While an answer is arriving the bubble holds plain text, so the caret is drawn rather than
+   appended — a pseudo-element costs nothing per frame, and the frame budget is the whole point of
+   painting text instead of re-parsing markdown sixty times a second. */
+/* Only the raw fallback needs pre-wrap; a rendered answer brings its own block layout. */
+.chat-bubble.is-streaming.is-raw { white-space: pre-wrap; }
+.chat-bubble.is-streaming::after {
+  content: ""; display: inline-block; width: 6px; height: 14px; margin-left: 2px;
   background: var(--accent); border-radius: 1px; vertical-align: -2px;
   animation: chatCaret 1s steps(1) infinite;
 }
@@ -520,10 +731,11 @@ body.page-chatbot .content-body {
 .chat-send svg { width: 16px; height: 16px; stroke-width: 2.2; }
 
 .chat-foot {
-  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
   margin-top: 7px; padding: 0 4px;
   font-size: 10.5px; color: var(--text-muted);
 }
+
 .chat-foot kbd {
   font-family: var(--font-mono); font-size: 9.5px;
   background: var(--surface-2); border: 1px solid var(--border); border-radius: 4px;
@@ -652,68 +864,6 @@ body.page-chatbot .content-body {
   .chat-inspect { position: absolute; right: 0; top: 0; height: 100%; width: min(360px, 100%); z-index: 31; box-shadow: var(--shadow); }
 }
 
-/* ── Retrieval, shown before the answer ────────────────────────────────────────────────────────
-   Deliberately not styled like an answer bubble. This is evidence the reader is meant to weigh,
-   and a card that looked like a reply would invite skimming past it to the part that reads like
-   a conclusion. */
-.chat-rag {
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--surface-2, var(--surface));
-  overflow: hidden;
-}
-.chat-rag.is-warn { border-color: var(--warn, #c98a2b); }
-
-.chat-rag-h {
-  display: flex; align-items: center; gap: 8px;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--border);
-  font-size: 13px; font-weight: 600;
-  color: var(--text);
-}
-.chat-rag-h svg { opacity: .7; flex: none; }
-.chat-rag-h b { margin-left: auto; font-weight: 500; opacity: .55; font-size: 12px; }
-
-.chat-rag-d { padding: 10px 12px; font-size: 13px; color: var(--text-dim, var(--text)); opacity: .8; }
-.chat-rag-l { display: flex; flex-direction: column; }
-
-.chat-rag-i {
-  display: flex; align-items: flex-start; gap: 10px;
-  padding: 9px 12px;
-  text-decoration: none; color: inherit;
-  border-top: 1px solid var(--border);
-}
-.chat-rag-i:first-child { border-top: 0; }
-.chat-rag-i:hover { background: var(--hover, rgba(127,127,127,.07)); }
-
-/* The rank, which is what the citation markers in the answer refer back to. */
-.chat-rag-n {
-  flex: none; width: 20px; height: 20px; border-radius: 6px;
-  display: grid; place-items: center;
-  background: var(--accent-soft, rgba(127,127,127,.14));
-  font-size: 11px; font-weight: 600; opacity: .85;
-}
-.chat-rag-b { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.chat-rag-t {
-  font-size: 13px; line-height: 1.35;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.chat-rag-m { font-size: 11px; opacity: .55; }
-
-/* The handoff. A rule with a label, not a bubble: it marks a boundary in the turn rather than
-   adding another voice to it. */
-.chat-hand {
-  display: flex; align-items: center; gap: 10px;
-  padding: 2px 0; margin: 2px 0;
-}
-.chat-hand-l { flex: 1; height: 1px; background: var(--border); }
-.chat-hand-t { font-size: 11px; opacity: .5; white-space: nowrap; }
-
-/* Greyed rather than hidden when grounding is off — a control that vanishes teaches nothing
-   about why it went. */
-.chat-select.is-k { max-width: 132px; }
-.chat-select.is-k.is-off { opacity: .4; }
-
 /* ── Markdown in answers ────────────────────────────────────────────────────── */
 /* A model formats whether or not it was asked to, so the bubble has to render markdown rather
    than show its syntax. Spacing is tuned for a chat bubble, not a document: the first and last
@@ -812,6 +962,10 @@ h5.chat-md-h, h6.chat-md-h { font-size: 12.5px; color: var(--text-muted); }
 
 /* ── Copy ───────────────────────────────────────────────────────────────────── */
 /* Sits in the meta row, at the far end of it. */
+/* The label beside the copy glyph. It had no rule at all, so it inherited the answer's type and
+   read as a stray word of prose next to an icon. */
+.chat-copy-t { font-size: 10px; font-weight: 600; letter-spacing: .01em; }
+
 .chat-copy {
   display: inline-flex; align-items: center; gap: 4px;
   font: inherit; font-size: 10.5px;
@@ -828,10 +982,3 @@ h5.chat-md-h, h6.chat-md-h { font-size: 12.5px; color: var(--text-muted); }
 
 /* Directly after the timestamp — the meta row's own gap is the whole separation it needs. */
 
-/* The stats footer counts the open conversation, not the whole browser. Labelled, because a bare
-   number in a sidebar reads as a running total and the difference matters: 1 blocked here means
-   this thread, not something that happened in another one last week. */
-.chat-stat-h {
-  font-size: 9px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase;
-  color: var(--text-muted); margin-bottom: 5px;
-}

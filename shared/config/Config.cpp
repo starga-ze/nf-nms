@@ -68,8 +68,7 @@ bool bootstrapDatabase()
     try
     {
         const nlohmann::json root = readStartupFile();
-        const nlohmann::json db = root.value("mgmtd", nlohmann::json::object())
-                                      .value("service", nlohmann::json::object())
+        const nlohmann::json db = root.value("pretzel", nlohmann::json::object())
                                       .value("database", nlohmann::json::object());
         if (db.is_object())
         {
@@ -128,19 +127,15 @@ nlohmann::json redactSecretsForPersist(nlohmann::json root)
     if (!root.is_object())
         return root;
 
-    auto m = root.find("mgmtd");
-    if (m == root.end() || !m->is_object())
-        return root;
-
-    auto s = m->find("service");
-    if (s == m->end() || !s->is_object())
+    auto s = root.find("pretzel");
+    if (s == root.end() || !s->is_object())
         return root;
 
     if (auto d = s->find("database"); d != s->end() && d->is_object())
         d->erase("password");
 
-    if (auto h = s->find("http"); h != s->end() && h->is_object())
-        h->erase("admin");
+    if (auto c = s->find("console"); c != s->end() && c->is_object())
+        c->erase("admin");
 
     return root;
 }
@@ -206,12 +201,6 @@ bool& runningConfigLoaded()
     return s_loaded;
 }
 
-std::map<std::string, nlohmann::json>& effectiveCache()
-{
-    static std::map<std::string, nlohmann::json> s_cache;
-    return s_cache;
-}
-
 const nlohmann::json& cachedRunningConfig()
 {
     if (!runningConfigLoaded())
@@ -222,74 +211,24 @@ const nlohmann::json& cachedRunningConfig()
     return runningConfigCache();
 }
 
-const nlohmann::json& effectiveDaemon(const std::string& daemonName)
-{
-    auto& cache = effectiveCache();
-    auto it = cache.find(daemonName);
-    if (it != cache.end())
-        return it->second;
-
-    const nlohmann::json& root = cachedRunningConfig();
-
-    nlohmann::json eff = root.value("global", nlohmann::json::object());
-    if (!eff.is_object())
-        eff = nlohmann::json::object();
-
-    auto dit = root.find(daemonName);
-    if (dit != root.end() && dit->is_object())
-        eff.merge_patch(*dit);
-
-    return cache.emplace(daemonName, std::move(eff)).first->second;
 }
 
-const nlohmann::json& nestedSection(const std::string& daemonName, const char* parent, const std::string& domain)
+const nlohmann::json& Config::scopeConfig(const std::string& scopeName)
 {
     static const nlohmann::json kEmpty = nlohmann::json::object();
 
-    const nlohmann::json& eff = effectiveDaemon(daemonName);
-
-    auto pit = eff.find(parent);
-    if (pit == eff.end() || !pit->is_object())
-        return kEmpty;
-
-    auto dit = pit->find(domain);
-    if (dit == pit->end() || !dit->is_object())
-        return kEmpty;
-
-    return *dit;
+    const nlohmann::json& root = cachedRunningConfig();
+    auto it = root.find(scopeName);
+    return (it != root.end() && it->is_object()) ? *it : kEmpty;
 }
 
-}
-
-bool Config::load(const std::string& daemonName)
+const nlohmann::json& Config::section(const std::string& scopeName, const std::string& domain)
 {
-    m_json = effectiveDaemon(daemonName);
-    if (m_json.empty())
-    {
-        std::cerr << "config: no effective config for daemon '" << daemonName
-                  << "' (startup-config missing and DB empty?) — using defaults" << std::endl;
-    }
-    return true;
-}
+    static const nlohmann::json kEmpty = nlohmann::json::object();
 
-const nlohmann::json& Config::json() const
-{
-    return m_json;
-}
-
-const nlohmann::json& Config::serviceSection(const std::string& daemonName, const std::string& domain)
-{
-    return nestedSection(daemonName, "service", domain);
-}
-
-const nlohmann::json& Config::systemSection(const std::string& daemonName, const std::string& domain)
-{
-    return nestedSection(daemonName, "system", domain);
-}
-
-const nlohmann::json& Config::daemonConfig(const std::string& daemonName)
-{
-    return effectiveDaemon(daemonName);
+    const nlohmann::json& scope = scopeConfig(scopeName);
+    auto it = scope.find(domain);
+    return (it != scope.end() && it->is_object()) ? *it : kEmpty;
 }
 
 nlohmann::json Config::runningConfigRoot()
@@ -381,8 +320,30 @@ bool Config::seedStore()
                 // have no business being reintroduced here.
                 if (it.key().rfind("//", 0) == 0)
                     continue;
+
                 if (!activeRoot.contains(it.key()))
+                {
                     additions[it.key()] = it.value();
+                    continue;
+                }
+
+                // The scope is there; a domain inside it may not be. Added one at a time, so an
+                // operator's edits to the domains that DO exist are untouched — the whole point of
+                // the back-fill is that it can only ever add.
+                const nlohmann::json& activeScope = activeRoot[it.key()];
+                if (!activeScope.is_object() || !it.value().is_object())
+                    continue;
+
+                nlohmann::json missing = nlohmann::json::object();
+                for (auto d = it.value().begin(); d != it.value().end(); ++d)
+                {
+                    if (d.key().rfind("//", 0) == 0)
+                        continue;
+                    if (!activeScope.contains(d.key()))
+                        missing[d.key()] = d.value();
+                }
+                if (!missing.empty())
+                    additions[it.key()] = std::move(missing);
             }
         }
 
@@ -396,7 +357,14 @@ bool Config::seedStore()
                 names += it.key();
             }
 
-            if (dbi.exec("UPDATE running_config SET config_json = config_json || $1::jsonb "
+            // Deep by one level. A bare `config_json || $1` at the top level would replace a
+            // whole scope OBJECT with the handful of domains being added, taking every domain the
+            // operator has edited with it. So the added scopes are rebuilt first — each as
+            // (what is stored) || (what is being added) — and only those keys are concatenated
+            // in. Scopes not named in $1 are never touched.
+            if (dbi.exec("UPDATE running_config SET config_json = config_json || COALESCE(("
+                         "  SELECT jsonb_object_agg(a.k, COALESCE(config_json -> a.k, '{}'::jsonb) || a.v) "
+                         "  FROM jsonb_each($1::jsonb) AS a(k, v)), '{}'::jsonb) "
                          "WHERE state = 'active'",
                          {additions.dump()}))
             {
@@ -471,7 +439,6 @@ bool Config::commitConfig(const nlohmann::json& fullRoot)
 void Config::invalidateConfigCache()
 {
     runningConfigLoaded() = false;
-    effectiveCache().clear();
 }
 
 std::uint64_t Config::runningConfigVersion()

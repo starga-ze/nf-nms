@@ -158,6 +158,35 @@ std::string toJson(const google::protobuf::Message& message)
 
 }
 
+std::string GrpcClient::applyConfig(const std::string& configJson, std::string& error)
+{
+    v1::ApplyConfigRequest request;
+    google::protobuf::util::JsonParseOptions parseOptions;
+    // A field the running config carries and this proto does not is not a reason to refuse the
+    // push: the rest of the document is still what the service should be running, and the
+    // alternative — dropping the whole deployment over one unknown key — is how a config schema
+    // change turns into an assistant that stops answering.
+    parseOptions.ignore_unknown_fields = true;
+    const auto parsed = google::protobuf::util::JsonStringToMessage(configJson, &request, parseOptions);
+    if (!parsed.ok())
+    {
+        error = "the assembled config is not valid for ApplyConfig: " + std::string(parsed.message());
+        return {};
+    }
+
+    grpc::ClientContext ctx;
+    v1::ApplyConfigResult reply;
+    const grpc::Status status = m_impl->stub->ApplyConfig(&ctx, request, &reply);
+    if (!status.ok())
+    {
+        error = "gRPC transport error: " + status.error_message();
+        return {};
+    }
+    if (!reply.ok())
+        error = reply.error().empty() ? "the service refused the configuration" : reply.error();
+    return toJson(reply);
+}
+
 std::string GrpcClient::listModels(std::string& error)
 {
     grpc::ClientContext ctx;

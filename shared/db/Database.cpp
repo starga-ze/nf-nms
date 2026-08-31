@@ -211,23 +211,37 @@ BEGIN
     END IF;
 END $rename_keyenc$;
 
--- The AI gateway client credential, sealed. Same reasoning that keeps issued device keys out of
--- running_config: the key is the customer's own gateway subscription, it is re-issued and rotated
--- on its own schedule, and running_config is append-versioned, shown verbatim in the review diff
--- and written out by Save-to-file — a key there would be permanent and readable by every reviewer,
--- and rotating it would mint a configuration version.
+-- Renamed from ai_gateway_credential_state: it never held a gateway's credential in production,
+-- and once the assistant became "one row per AI provider" the old name described an arrangement
+-- that no longer existed. Guarded so an upgrade renames and a fresh install just creates.
+DO $rename_ai_cred$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.tables
+               WHERE table_name = 'ai_gateway_credential_state')
+       AND NOT EXISTS (SELECT 1 FROM information_schema.tables
+               WHERE table_name = 'ai_provider_credential_state') THEN
+        ALTER TABLE ai_gateway_credential_state RENAME TO ai_provider_credential_state;
+    END IF;
+END $rename_ai_cred$;
+
+-- The AI providers' API keys, sealed. Same reasoning that keeps issued device keys out of
+-- running_config: a key is the customer's own vendor subscription, it is re-issued and rotated on
+-- its own schedule, and running_config is append-versioned, shown verbatim in the review diff and
+-- written out by Save-to-file — a key there would be permanent and readable by every reviewer, and
+-- rotating it would mint a configuration version.
 --
--- What DOES live in running_config is the declaration around it: which host, which model, whether
--- grounding is on. Those are choices an operator makes and should see diffed; this table holds only
--- the secret and the record of whether it last worked.
+-- What DOES live in running_config is the declaration around it: which vendors are configured and
+-- which of their models this appliance may ask for. Those are choices an operator makes and
+-- should see diffed; this table holds only the secret and the record of whether it last worked.
 --
--- One row, id='portkey' today. Keyed rather than a singleton so a second gateway (a failover
--- endpoint, a different vendor) does not need a schema change to sit beside the first.
+-- One row per provider — 'openai', 'google', 'anthropic' — because a key is issued by the vendor
+-- and works for every model they serve. Keyed rather than a singleton so a fourth vendor does not
+-- need a schema change to sit beside the first three.
 --
--- Written only by engined, and the value arrives already sealed: inferd seals it with
+-- Written only by engined, and the value arrives already sealed: mgmtd seals it with
 -- /etc/pretzel/credentials.key, exactly as collectord does for device credentials, so the plaintext
 -- crosses the socket once on entry and never on use.
-CREATE TABLE IF NOT EXISTS ai_gateway_credential_state (
+CREATE TABLE IF NOT EXISTS ai_provider_credential_state (
     id             TEXT PRIMARY KEY,
     key_enc        TEXT,            -- AES-256-GCM, base64(nonce ‖ tag ‖ ciphertext)
     last_test_at   TIMESTAMPTZ,

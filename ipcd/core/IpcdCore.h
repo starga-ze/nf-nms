@@ -33,8 +33,6 @@ protected:
     void onShutdown() override;
 
 private:
-    LoggerConfig m_loggerConfig;
-    IpcConfig m_ipcConfig;
 
     std::unique_ptr<ThreadManager> m_threadManager;
     std::unique_ptr<IpcServer> m_ipcServer;

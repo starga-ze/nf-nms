@@ -26,7 +26,7 @@ using json = nlohmann::json;
 namespace
 {
 
-// A turn is a person typing, not a file upload. The cap is here rather than in inferd because a
+// A turn is a person typing, not a file upload. The cap is here rather than in pretzel-ai because a
 // request this size should never have crossed the IPC socket in the first place — and IPC frames
 // are bounded (IPC_MAX_FRAME_SIZE), so an oversized turn would fail as a transport error rather
 // than as the "too long" the operator needs to read.

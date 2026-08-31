@@ -63,7 +63,7 @@ constexpr std::chrono::seconds kInitialDelay{3};
 bool resolveDevice(const std::string& objectOid, std::string& host, std::uint16_t& port,
                    std::string& fingerprint)
 {
-    const auto& site = pz::config::Config::serviceSection("engined", "site");
+    const auto& site = pz::config::Config::section(pz::config::scope::kPretzel, "site");
     // A connector's object may name either device kind; both arrays are searched by oid.
     json devices = json::array();
     for (const char* key : {"ngfw_devices", "sase_devices"})

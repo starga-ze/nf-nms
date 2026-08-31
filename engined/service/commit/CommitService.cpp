@@ -206,10 +206,10 @@ void CommitService::handleAction(EnginedServiceManager& serviceManager, const Co
 
         for (const auto& change : changes)
         {
-            const std::string daemon = change.value("daemon", "");
+            const std::string scopeName = change.value("scope", "");
             const std::string domain = change.value("domain", "");
 
-            if (daemon.empty() || domain.empty() || !change.contains("values"))
+            if (scopeName.empty() || domain.empty() || !change.contains("values"))
             {
                 LOG_WARN("skipping malformed change entry");
                 failed++;
@@ -219,19 +219,16 @@ void CommitService::handleAction(EnginedServiceManager& serviceManager, const Co
             const json& values = change["values"];
             if (!values.is_object())
             {
-                LOG_WARN("'values' not object (daemon={}, domain={})", daemon, domain);
+                LOG_WARN("'values' not object (scope={}, domain={})", scopeName, domain);
                 failed++;
                 continue;
             }
 
-            const char* parent = "service";
-            if (root.contains(daemon) && root[daemon].contains("system") && root[daemon]["system"].contains(domain))
-            {
-                parent = "system";
-            }
-
-            root[daemon][parent][domain].merge_patch(values);
-            LOG_DEBUG("staged (daemon={}, domain={}.{}, keys={})", daemon, parent, domain, values.size());
+            // Two levels now, not three. The system/service split under each daemon was there to
+            // say "infrastructure" versus "what an operator picked"; the scope says that instead —
+            // `global` is the infrastructure, and mgmtd refuses to route a change addressing it.
+            root[scopeName][domain].merge_patch(values);
+            LOG_DEBUG("staged (scope={}, domain={}, keys={})", scopeName, domain, values.size());
             applied++;
         }
 

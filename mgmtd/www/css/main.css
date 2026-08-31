@@ -3785,22 +3785,27 @@ input::placeholder, textarea::placeholder { color: var(--text-muted); opacity: 1
 
 /* ── Configuration tables (one block per tab) ─────────────────────────────────
    Shared chrome first, then only the column widths that differ per tab. */
-.cfg-table-site, .cfg-table-device, .cfg-table-apikey, .cfg-table-endpoint, .cfg-table-conn {
+.cfg-table-site, .cfg-table-device, .cfg-table-apikey, .cfg-table-endpoint, .cfg-table-conn,
+.cfg-table-aiprov {
   background: var(--surface); border: 1px solid var(--border);
   border-radius: var(--radius); overflow: hidden;
 }
 .cfg-table-site th, .cfg-table-device th, .cfg-table-apikey th,
-.cfg-table-endpoint th, .cfg-table-conn th { font-size: 9.5px; padding: 8px 12px; }
+.cfg-table-endpoint th, .cfg-table-conn th, .cfg-table-aiprov th { font-size: 9.5px; padding: 8px 12px; }
 .cfg-table-site td, .cfg-table-device td, .cfg-table-apikey td,
-.cfg-table-endpoint td, .cfg-table-conn td { font-size: 11px; padding: 7px 12px; vertical-align: middle; }
+.cfg-table-endpoint td, .cfg-table-conn td,
+.cfg-table-aiprov td { font-size: 11px; padding: 7px 12px; vertical-align: middle; }
 .cfg-table-site .muted, .cfg-table-device .muted, .cfg-table-apikey .muted,
-.cfg-table-endpoint .muted, .cfg-table-conn .muted { color: var(--text-muted); opacity: .6; }
+.cfg-table-endpoint .muted, .cfg-table-conn .muted,
+.cfg-table-aiprov .muted { color: var(--text-muted); opacity: .6; }
 .cfg-table-site td.col-act .icon-btn, .cfg-table-device td.col-act .icon-btn,
 .cfg-table-apikey td.col-act .icon-btn, .cfg-table-endpoint td.col-act .icon-btn,
-.cfg-table-conn td.col-act .icon-btn { width: 26px; height: 26px; margin-left: 6px; }
+.cfg-table-conn td.col-act .icon-btn,
+.cfg-table-aiprov td.col-act .icon-btn { width: 26px; height: 26px; margin-left: 6px; }
 .cfg-table-site td.col-act .icon-btn svg, .cfg-table-device td.col-act .icon-btn svg,
 .cfg-table-apikey td.col-act .icon-btn svg, .cfg-table-endpoint td.col-act .icon-btn svg,
-.cfg-table-conn td.col-act .icon-btn svg { width: 13px; height: 13px; }
+.cfg-table-conn td.col-act .icon-btn svg,
+.cfg-table-aiprov td.col-act .icon-btn svg { width: 13px; height: 13px; }
 .cfg-table-apikey td.col-act, .cfg-table-endpoint td.col-act { white-space: nowrap; }
 
 /* Sites: Name | Description | Devices */
@@ -4090,37 +4095,99 @@ input::placeholder, textarea::placeholder { color: var(--text-muted); opacity: 1
 .tdp-doc-n, .tdp-doc-when { text-align: right; color: var(--text-muted); font-variant-numeric: tabular-nums; }
 .tdp-more { display: block; width: 100%; border: none; border-top: 1px solid var(--border); border-radius: 0; padding: 8px; }
 
-/* ── Configuration ▸ AI Assistant (js/ai-assistant.js) ─────────────────────────────────────────
-   The deployment matrix: two segmented axes side by side, and one panel that names the row they
-   select. The panel is the point of the page — the two words above it do not, on their own, say
-   what the combination means or what it leaves uninspected. */
-.ai-axes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin: 10px 0 14px; }
-@media (max-width: 720px) { .ai-axes { grid-template-columns: 1fr; } }
-.ai-axis-h {
-  font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
-  color: var(--text-muted); margin-bottom: 7px;
+/* ── Configuration ▸ AI Provider (js/ai-provider.js) ───────────────────────────────────────────
+   An ordinary Configuration tab: table, Add, slideover editor, edit/delete at the right of a row.
+   Column order follows the order the fields are filled — which vendor, its key, then what to ask
+   it for. */
+.cfg-table-aiprov .col-name   { width: 22%; }
+.cfg-table-aiprov .col-key    { width: 22%; }
+.cfg-table-aiprov .col-models { width: auto; }
+.cfg-table-aiprov .col-act    { width: 8%; text-align: right; white-space: nowrap; }
+
+/* The key's state: a coloured dot and one word. Scannable down the column at a glance, which a
+   green string of text next to a timestamp was not. A staged key is deliberately a different
+   colour from a stored one — the point of moving the key onto Publish is that "entered" and "in
+   effect" stop being the same moment, and the column has to show which one this is. */
+/* The model family beside the vendor. A separator and a gap, because the two were adjacent inline
+   spans with nothing between them and rendered as one word — "OpenAIGPT". */
+.ai-fam { color: var(--text-muted); font-size: 10.5px; font-weight: 400; }
+.ai-fam::before { content: "·"; margin: 0 5px; color: var(--border); }
+
+.ai-key { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
+.ai-key i { width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex: none; }
+.ai-key.is-set     { color: var(--ink-green); }
+.ai-key.is-staged  { color: var(--ink-orange); }
+.ai-key.is-drop    { color: var(--ink-red); }
+.ai-key.is-none    { color: var(--text-muted); }
+.ai-key.is-none i  { background: none; border: 1.5px solid currentColor; }
+.ai-key.is-unknown { color: var(--text-muted); opacity: .6; }
+.ai-key.is-unknown i { background: none; border: 1.5px dashed currentColor; }
+
+/* Models: a count and the first couple inline, the rest on hover. Every id is long and they are
+   near-identical within a vendor, so a cell that printed them all would be one nobody can scan.
+   .mdl-row is shared by the cell and the card, so the two read identically — same font, same
+   colours — which is what makes the card feel like the cell growing rather than a second widget. */
+.mdl { display: flex; flex-direction: column; gap: 2px; cursor: default; }
+.mdl-count { font-size: 10px; color: var(--accent); font-weight: 600; margin-bottom: 2px; }
+.mdl-count b { color: var(--accent); font-weight: 700; }
+.mdl-row { display: flex; align-items: baseline; gap: 6px; }
+.mdl-name {
+  font-size: 11px; font-weight: 600; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.ai-legend { margin-top: 9px; display: flex; flex-direction: column; gap: 3px; }
-.ai-legend-row { display: flex; gap: 8px; font-size: 11.5px; color: var(--text-muted); opacity: .55; }
-.ai-legend-row.on { opacity: 1; color: var(--text-secondary); }
-.ai-legend-row b { min-width: 84px; font-weight: 600; color: inherit; }
+.mdl-id {
+  font-size: 10.5px; font-family: var(--font-mono); color: var(--text-muted); white-space: nowrap;
+}
+.mdl-id::before { content: "|"; color: var(--border); margin-right: 6px; }
+.mdl-more { font-size: 10px; color: var(--text-muted); margin-top: 1px; }
+#aiModelPop .mdl-row { padding: 1px 0; }
 
-.ai-row { border: 1px solid var(--border); border-left-width: 3px; border-radius: 8px; padding: 10px 13px; }
-.ai-row.ok   { border-left-color: var(--green);  background: var(--surface-2); }
-.ai-row.warn { border-left-color: var(--orange); background: var(--tint-orange); }
-.ai-row.bad  { border-left-color: var(--red);    background: var(--tint-red); }
-.ai-row-h { font-size: 12.5px; font-weight: 700; margin-bottom: 3px; }
-.ai-row.warn .ai-row-h { color: var(--ink-orange); }
-.ai-row.bad  .ai-row-h { color: var(--ink-red); }
-.ai-row-b { font-size: 12px; color: var(--text-secondary); line-height: 1.55; }
-.ai-row-n { margin-top: 6px; font-size: 11.5px; color: var(--text-muted); line-height: 1.5; }
-.ai-row + .ak-radio { margin-top: 12px; }
+/* The outcome of a key store, reported on the page because Publish has closed the panel by then. */
+.ai-banner {
+  margin-bottom: 12px; padding: 9px 12px; border-radius: 8px; font-size: 12px;
+  color: var(--ink-green); background: var(--tint-green); border: 1px solid transparent;
+}
+.ai-banner.bad { color: var(--ink-red); background: var(--tint-red); }
 
-.ai-prov { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
-.ai-prov-row { display: grid; grid-template-columns: 140px minmax(0, 1fr) 30px; gap: 8px; align-items: center; }
-.ai-prov-row input {
-  width: 100%; padding: 7px 10px; font-size: 12px; color: var(--text);
+/* ── The editor ─────────────────────────────────────────────────────────────────────────────── */
+.ed-sec { padding: 16px 0 0; border-top: 1px solid var(--border); margin-top: 4px; }
+.ed-sec-h {
+  font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  color: var(--text-muted); margin-bottom: 10px;
+}
+.ed-sec-h .info-hint { text-transform: none; letter-spacing: 0; font-weight: 400; margin-left: 6px; }
+.ed-foot-note { flex: 1; font-size: 11px; color: var(--text-muted); }
+
+/* The key field sits in a field-row like every other input, so the panel reads as one form. */
+.ai-key-row { display: flex; gap: 8px; align-items: center; width: 100%; }
+.ai-key-row input {
+  flex: 1 1 auto; min-width: 0;
+  padding: 7px 10px; font-size: 12px; color: var(--text);
   background: var(--surface); border: 1px solid var(--border); border-radius: 7px;
 }
-.ai-prov-row input:focus { outline: none; border-color: var(--accent); }
-.ai-prov-id { font-family: var(--font-mono); }
+.ai-key-row input:focus { outline: none; border-color: var(--accent); }
+.ai-key-row input::placeholder { letter-spacing: .5px; }
+
+/* One row per model: the whole row is the hit target, not just the box. */
+.ai-pick {
+  border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--surface);
+}
+.ai-pick-row {
+  display: grid; grid-template-columns: 16px minmax(0, 1fr) auto;
+  gap: 10px; align-items: center;
+  padding: 9px 12px; border-top: 1px solid var(--border);
+  font-size: 12px; cursor: pointer;
+}
+.ai-pick-row:first-child { border-top: none; }
+.ai-pick-row:hover { background: var(--surface-2); }
+.ai-pick-row.on { background: var(--tint-green); }
+.ai-pick-row input { margin: 0; cursor: pointer; }
+.ai-pick-name { font-weight: 600; }
+.ai-pick-id {
+  color: var(--text-muted); font-size: 11px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+.field-hint.bad { color: var(--ink-red); }
+.btn-sm.danger { color: var(--ink-red); }
+.btn-sm.danger:hover { background: var(--tint-red); }

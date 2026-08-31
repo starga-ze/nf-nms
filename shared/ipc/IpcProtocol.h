@@ -21,13 +21,12 @@ enum class IpcDaemon : std::uint8_t
     Topologyd = 6,
     Mgmtd = 7,
     Apid = 8,
-    Inferd = 9,
-    // Retired. Retrieval was briefly its own daemon; it lives in inferd now, because embedding the
-    // query and answering from it are the same concern and splitting them bought a serialisation
-    // hop and a second failure mode. The value is kept rather than reused: ids are a wire contract
-    // mirrored in inferd/transport/ipc_protocol.py, and handing 10 to a future daemon would make
-    // an old peer's frames route to it silently.
-    Ragd = 10,
+    // 9 (Inferd) and 10 (Ragd) retired. Inference was an IPC daemon of ours until it moved out to
+    // the standalone pretzel-ai service, which is reached over gRPC and is not on this fabric at
+    // all; retrieval was briefly a daemon of its own before that, and folded into inference because
+    // embedding a query and answering from it are one concern. Both values are kept spent rather
+    // than reused: ids are a wire contract, and handing 9 to a future daemon would make an old
+    // peer's frames route to it silently instead of being rejected.
 
     Broadcast = 255
 };
@@ -135,14 +134,15 @@ enum class IpcCmd : std::uint16_t
     // the IPC fabric onto the pretzel-ai gRPC transport (see mgmtd/grpc/). The numbers are left
     // unused rather than reassigned so an old peer's frame is rejected, not silently misrouted.
 
-    // The gateway client credential. Same three-hop shape as an API Key's account credential
-    // (ApiCredentialStoreRequest/StateUpdate above): the operator's key crosses the socket once, in
-    // plaintext, on the way in. NOTE: still routed to the (now-retired) inferd daemon — the sealed-
-    // storage credential path has not been re-homed onto pretzel-ai yet, so this feature is dormant
-    // (the AI Gateway console page has no live daemon to seal the key). Kept pending that work.
-    GatewayCredentialStoreRequest = 145,   // mgmtd → (inferd): {id, api_key} — seal and persist
-    GatewayCredentialStoreResponse = 146,  // → mgmtd: outcome, on the seqNo the browser polls
-    GatewayCredentialStateUpdate = 147,    // → engined: {id, key_enc, ...} — already sealed
+    // The AI assistant's vendor API keys — one sealed row per vendor (openai / gemini / claude).
+    //
+    // 145–146 (GatewayCredentialStoreRequest/Response) retired: they delegated the sealing to the
+    // inferd daemon, which no longer exists. The assistant's peer is pretzel-ai, which is not on
+    // this fabric, so there is no worker to delegate to — mgmtd already holds the plaintext and
+    // seals it itself (AiController), leaving one hop instead of three. The numbers are left
+    // unused rather than reassigned so an old peer's frame is rejected, not silently misrouted.
+    AiCredentialStateUpdate = 147,    // mgmtd → engined: {id, key_enc} — already sealed,
+                                           //   or {id, clear:true} to remove one
 };
 
 // Coarse role of a command, orthogonal to its domain. Feeds IpcProtocol::isRoutingAllowed, which

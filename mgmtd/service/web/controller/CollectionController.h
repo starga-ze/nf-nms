@@ -18,7 +18,7 @@ class MgmtdServiceManager;
 //
 // A stream exists in two places and both are needed to tell the truth about it:
 //
-//   config — the operator's declaration (collectord.api.connectors[].items[]): this endpoint SHOULD
+//   config — the operator's declaration (pretzel.connector.connectors[].items[]): this endpoint SHOULD
 //            be polled every N seconds. A stream declared minutes ago with no samples yet is not an
 //            error, and a stream that vanished from config is not a live stream however many rows it
 //            left behind.

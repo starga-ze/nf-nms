@@ -29,7 +29,7 @@ namespace
 
 const json& apiConfig()
 {
-    return pz::config::Config::serviceSection("collectord", "api");
+    return pz::config::Config::section(pz::config::scope::kPretzel, "connector");
 }
 
 }
@@ -579,7 +579,7 @@ void ApiService::autoRefreshTick(CollectordServiceManager& sm, std::chrono::stea
 {
     using namespace std::chrono;
 
-    const auto& site = pz::config::Config::serviceSection("engined", "site");
+    const auto& site = pz::config::Config::section(pz::config::scope::kPretzel, "site");
     // A profile's device may be either kind, so both arrays are searched below; tag device_type
     // (dropped from config) back on so the keygen path can tell them apart.
     json devices = json::array();

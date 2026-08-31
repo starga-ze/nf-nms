@@ -84,6 +84,11 @@ HeartbeatService& ApidServiceManager::heartbeatService()
     return m_heartbeatService;
 }
 
+ReloadService& ApidServiceManager::reloadService()
+{
+    return m_reloadService;
+}
+
 ApidTxRouter& ApidServiceManager::txRouter()
 {
     return *m_txRouter;

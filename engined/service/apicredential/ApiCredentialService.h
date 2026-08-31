@@ -40,10 +40,10 @@ private:
     // Stores a validated+sealed SASE device health api-key into sase_device.api_key_enc.
     void storeSaseApiKey(const std::string& payloadJson);
 
-    // Stores the sealed AI gateway client credential into ai_gateway_credential_state. inferd seals
+    // Stores a sealed AI provider credential into ai_provider_credential_state. mgmtd seals
     // it and opens it again when a turn needs it; engined only ever sees ciphertext, exactly as it
     // does for a device credential.
-    void storeGatewayCredential(const std::string& payloadJson);
+    void storeAiCredential(const std::string& payloadJson);
 
     // Answers ApiCredentialStateRequest with every issued key, sealed, routed back to `requester`
     // (probed or collectord). seqNo is the requester's correlation value and is echoed back.

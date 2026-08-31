@@ -1,5 +1,6 @@
 #pragma once
 
+#include "service/web/controller/AiController.h"
 #include "service/web/controller/ApiController.h"
 #include "service/web/controller/AuthController.h"
 #include "service/web/controller/ChatController.h"
@@ -76,6 +77,10 @@ enum class WebRoute
     CollectionOverview,   // GET  /api/collection/overview?window=
     CollectionSamples,    // GET  /api/collection/samples?connector=&endpoint=&status=&before=&limit=
     CollectionSample,     // GET  /api/collection/sample?oid=
+
+    // AiController — the assistant's vendor keys, which cannot ride a commit.
+    AiCredentials,      // GET  /api/ai/credentials
+    AiCredentialStore,  // POST /api/ai/credential
 
     // ChatController — the internal assistant.
     ChatSend,     // POST /api/chat
@@ -184,6 +189,7 @@ private:
     StatusController m_statusController;
     TopologyController m_topologyController;
     ApiController m_apiController;
+    AiController m_aiController;
     ChatController m_chatController;
     TechDocController m_techDocController;
     BenchtestController m_benchtestController;

@@ -27,7 +27,7 @@ namespace
 
 const nlohmann::json& probeConfig()
 {
-    return pz::config::Config::serviceSection("probed", "probe");
+    return pz::config::Config::section(pz::config::scope::kPretzel, "probe");
 }
 
 std::size_t probeBatchSize()
@@ -73,7 +73,7 @@ std::vector<std::string> probeExplicitTargets()
     std::vector<std::string> result;
     // Only NGFW devices have an address to ping (SASE is reached through its tenant API), so read
     // just the ngfw_devices array. Devices are declared once, next to the sites they belong to.
-    const auto& cfg = pz::config::Config::serviceSection("engined", "site");
+    const auto& cfg = pz::config::Config::section(pz::config::scope::kPretzel, "site");
     for (const auto& t : cfg.value("ngfw_devices", nlohmann::json::array()))
     {
         if (!t.is_object())

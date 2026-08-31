@@ -107,7 +107,7 @@
       if (r.status === 401) { location.href = '/'; return; }
       const d = await r.json();
       window.NMS.draft.checkBase(d.version);
-      const site = ((d.daemons || {}).engined || {}).site || {};
+      const site = ((d.scopes || {}).pretzel || {}).site || {};
       // Config stores two type-specific arrays; the editor works on one merged list tagged with
       // device_type, and splitForConfig() puts them back on commit.
       const ngfw = (Array.isArray(site.ngfw_devices) ? site.ngfw_devices : [])
@@ -134,7 +134,7 @@
     return { ngfw_devices: ngfw_devices, sase_devices: sase_devices };
   }
 
-  const commitPayload = () => [{ daemon: 'engined', domain: 'site', values: splitForConfig(state.devices) }];
+  const commitPayload = () => [{ scope: 'pretzel', domain: 'site', values: splitForConfig(state.devices) }];
 
   // Site is a reference; show the site's name, and flag a dangling oid so a deleted site is
   // visible rather than silently blank.
