@@ -10,6 +10,7 @@
 #include "service/web/controller/LogsController.h"
 #include "service/web/controller/SettingsController.h"
 #include "service/web/controller/SsoController.h"
+#include "service/web/controller/UserController.h"
 #include "service/web/controller/StatusController.h"
 #include "service/web/controller/TopologyController.h"
 
@@ -81,6 +82,14 @@ enum class WebRoute
     // AiController — the assistant's vendor keys, which cannot ride a commit.
     AiCredentials,      // GET  /api/ai/credentials
     AiCredentialStore,  // POST /api/ai/credential
+
+    ChatSessions,       // GET  /api/chat/sessions
+    ChatSession,        // GET  /api/chat/session?oid=
+    ChatSessionDelete,  // POST /api/chat/session/delete
+    ChatSessionPatch,   // POST /api/chat/session/patch
+
+    UserCredentials,      // GET  /api/user/credentials
+    UserCredentialStore,  // POST /api/user/credential
 
     // ChatController — the internal assistant.
     ChatSend,     // POST /api/chat
@@ -185,6 +194,7 @@ private:
     // service manager). Reached from the dispatch switch by member call, not a function pointer.
     AuthController m_authController;
     SsoController m_ssoController;
+    UserController m_userController;
     SettingsController m_settingsController;
     StatusController m_statusController;
     TopologyController m_topologyController;

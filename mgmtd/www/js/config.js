@@ -451,11 +451,20 @@
     return keys.filter(k => k.device === oid).length;
   }
 
-  function removeDevice(idx) {
+  async function removeDevice(idx) {
     const d = state.devices[idx];
     const used = referenceCount(d.oid);
-    if (used && !confirm(`${used} API key${used > 1 ? 's' : ''} reference this device. Delete anyway?`))
-      return false;
+    if (used)
+    {
+      const ok = await window.NMS.confirm({
+        title: 'Remove device',
+        message: `${used} API credential${used > 1 ? 's' : ''} reference this device.`,
+        detail: 'They will show as missing until you point them at another device.',
+        confirmLabel: 'Remove anyway',
+      });
+      if (!ok)
+        return false;
+    }
     state.devices.splice(idx, 1);
     stage();
     return true;
@@ -558,12 +567,14 @@
     document.getElementById('devOverlay').onclick = closeEditor;
 
     const del = document.getElementById('devDelete');
-    if (del) del.onclick = () => { if (removeDevice(editIdx)) { closeEditor(); render(); } };
+    if (del) del.onclick = async () => { if (await removeDevice(editIdx)) { closeEditor(); render(); } };
 
     document.getElementById('devSave').onclick = async () => {
+      window.NMS.utils.clearEditorError(body);
       const d = collectForm(body);
-      if (!d.name) { alert('Device name is required.'); return; }
-      if (!d.target) { alert(`${accessLabel(d.device_type)} is required.`); return; }
+      if (!d.name) return window.NMS.utils.editorError(body, 'Device name is required.', 'name');
+      if (!d.target)
+        return window.NMS.utils.editorError(body, `${accessLabel(d.device_type)} is required.`, 'target');
 
       // A freshly pasted api-key goes to the appliance now, not into the staged draft: it is sealed
       // there and must outlive both this page and the publish that clears the draft. Everything else
@@ -594,8 +605,8 @@
   function wireRows(scope) {
     scope.querySelectorAll('[data-edit]').forEach(b =>
       b.addEventListener('click', () => openEditor(+b.dataset.edit)));
-    scope.querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', () => {
-      if (removeDevice(+b.dataset.del)) render();
+    scope.querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', async () => {
+      if (await removeDevice(+b.dataset.del)) render();
     }));
     scope.querySelectorAll('[data-satest]').forEach(b =>
       b.addEventListener('click', () => runSaseRowTest(+b.dataset.satest)));

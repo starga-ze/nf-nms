@@ -11,7 +11,6 @@
 #include "service/IpcdServiceManager.h"
 
 #include "config/ConfigTypes.h"
-#include "util/ThreadManager.h"
 
 #include <memory>
 
@@ -20,7 +19,6 @@ namespace pz::ipcd
 
 using LoggerConfig = pz::config::LoggerConfig;
 using IpcConfig = pz::config::IpcConfig;
-using ThreadManager = pz::util::ThreadManager;
 
 class IpcdCore : public pz::core::Core
 {
@@ -34,7 +32,6 @@ protected:
 
 private:
 
-    std::unique_ptr<ThreadManager> m_threadManager;
     std::unique_ptr<IpcServer> m_ipcServer;
 
     std::unique_ptr<IpcdEventFactory> m_eventFactory;

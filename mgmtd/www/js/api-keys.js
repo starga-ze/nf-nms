@@ -435,8 +435,6 @@
 
         <div id="akTable"></div>
 
-        <p class="cfg-foot-note">Issued keys are encrypted on the appliance and kept out of the
-          configuration. The password you type is not stored.</p>
       </div>
 
       <div class="slideover-overlay" id="akOverlay"></div>
@@ -614,18 +612,22 @@
     document.getElementById('akOverlay').onclick = closeEditor;
 
     const del = document.getElementById('akDelete');
-    if (del) del.onclick = () => { if (removeKey(editIdx)) { closeEditor(); render(); } };
+    if (del) del.onclick = async () => { if (await removeKey(editIdx)) { closeEditor(); render(); } };
 
     document.getElementById('akSave').onclick = async () => {
+      window.NMS.utils.clearEditorError(body);
       const k = collect(body);
       const dv = (window.NMS.devices && window.NMS.devices.byOid(k.device)) || null;
       const sp = credSpec(dv ? dv.device_type : 'ngfw');
-      if (!k.name) { alert('Name is required.'); return; }
-      if (!k.device) { alert('Select the device this key belongs to.'); return; }
+      if (!k.name) return window.NMS.utils.editorError(body, 'Name is required.', 'name');
+      if (!k.device)
+        return window.NMS.utils.editorError(body, 'Select the device this key belongs to.', 'device');
       if (sp.hostEndpoint) {
-        if (!k.endpoint || k.endpoint.indexOf('/') < 1) { alert('Token endpoint must be a host and path, e.g. auth.apps.paloaltonetworks.com/oauth2/access_token'); return; }
+        if (!k.endpoint || k.endpoint.indexOf('/') < 1)
+          return window.NMS.utils.editorError(
+            body, 'Token endpoint must be a host and a path.', 'endpoint');
       } else if (!k.endpoint || k.endpoint[0] !== '/') {
-        alert('Endpoint must be a path starting with /'); return;
+        return window.NMS.utils.editorError(body, 'Endpoint must be a path starting with /', 'endpoint');
       }
 
       // A password typed here goes to the appliance now, sealed, rather than sitting in this
@@ -660,11 +662,20 @@
     return conns.filter(c => c.api_key === oid).length;
   }
 
-  function removeKey(idx) {
+  async function removeKey(idx) {
     const k = state.keys[idx];
     const used = usedByCount(k.oid);
-    if (used && !confirm(`${used} connector${used > 1 ? 's' : ''} still reference this key. Delete anyway?`))
-      return false;
+    if (used)
+    {
+      const ok = await window.NMS.confirm({
+        title: 'Remove API credential',
+        message: `${used} connector${used > 1 ? 's' : ''} still reference this credential.`,
+        detail: 'They will show as missing until you point them somewhere else.',
+        confirmLabel: 'Remove anyway',
+      });
+      if (!ok)
+        return false;
+    }
     secrets.drop(k.oid);
     state.keys.splice(idx, 1);
     stage();
@@ -833,8 +844,8 @@
   function wireRows(scope) {
     scope.querySelectorAll('[data-edit]').forEach(b =>
       b.addEventListener('click', () => openEditor(+b.dataset.edit)));
-    scope.querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', () => {
-      if (removeKey(+b.dataset.del)) render();
+    scope.querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', async () => {
+      if (await removeKey(+b.dataset.del)) render();
     }));
     scope.querySelectorAll('[data-test]').forEach(b =>
       b.addEventListener('click', () => runKeygenTest(+b.dataset.test)));

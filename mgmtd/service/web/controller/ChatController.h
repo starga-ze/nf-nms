@@ -33,6 +33,20 @@ public:
     // declaration the operator commits. Held in running_config it would be diffed and rolled back
     // like a policy, and rolling the configuration back does not put a model back in the account.
     void models(MgmtdServiceManager& sm, const pz::http::HttpRequest& req, pz::http::HttpResponse& resp);
+
+    // GET /api/chat/sessions — the signed-in account's conversations, newest first. No messages:
+    // the rail draws from this and reads none.
+    void sessions(MgmtdServiceManager& sm, const pz::http::HttpRequest& req, pz::http::HttpResponse& resp);
+
+    // GET /api/chat/session?oid= — one conversation's messages, oldest first.
+    void session(MgmtdServiceManager& sm, const pz::http::HttpRequest& req, pz::http::HttpResponse& resp);
+
+    // POST /api/chat/session/delete — { oid } removes one conversation and its messages.
+    void sessionDelete(MgmtdServiceManager& sm, const pz::http::HttpRequest& req, pz::http::HttpResponse& resp);
+
+    // POST /api/chat/session/patch — { oid, title?, draft? }. The fields a conversation carries
+    // that are not a turn: renaming it, and what is typed and not yet sent.
+    void sessionPatch(MgmtdServiceManager& sm, const pz::http::HttpRequest& req, pz::http::HttpResponse& resp);
 };
 
 }

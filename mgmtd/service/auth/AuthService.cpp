@@ -3,9 +3,12 @@
 #include "service/MgmtdServiceManager.h"
 #include "service/auth/AuthEvent.h"
 
+#include "config/Config.h"
 #include "db/Database.h"
 #include "util/Logger.h"
 #include "util/PasswordHash.h"
+
+#include <nlohmann/json.hpp>
 
 #include <openssl/rand.h>
 
@@ -15,54 +18,118 @@
 namespace pz::mgmtd
 {
 
+// Every account, read where it is needed rather than cached here.
+//
+// This used to hold one row — `WHERE username = 'admin'` — and login compared the name against it
+// before checking anything else, so an account created in the console could be written correctly to
+// local_users and still be refused at the door. There is more than one account now, and the table
+// is the only thing that knows them all.
+AuthService::Stored AuthService::readAccount(const std::string& username)
+{
+    Stored out;
+    try
+    {
+        const auto rows = pz::db::Database::instance().queryRows(
+            "SELECT username, password_hash, salt, must_change FROM local_users "
+            "WHERE username = $1 LIMIT 1",
+            {username});
+        if (rows.empty() || rows.front().size() < 4)
+            return out;
+
+        out.username = rows.front()[0];
+        out.passwordHash = rows.front()[1];
+        out.salt = rows.front()[2];
+        out.mustChange = (rows.front()[3] == "t");
+        out.found = true;
+    }
+    catch (const std::exception& ex)
+    {
+        LOG_WARN("local account read failed: {}", ex.what());
+    }
+    return out;
+}
+
+// The role is a declaration, so it comes from running_config and not from the credential table.
+// An account with a row and no declaration is one the appliance cannot say anything about, and the
+// safe reading of that is the lesser role.
+std::string AuthService::declaredRole(const std::string& username)
+{
+    const auto& users = pz::config::Config::section(pz::config::scope::kPretzel, "user");
+    for (const auto& u : users.value("list", nlohmann::json::array()))
+    {
+        if (u.is_object() && u.value("username", std::string()) == username)
+        {
+            const std::string role = u.value("role", std::string());
+            return role == kRoleAdmin ? kRoleAdmin : kRoleUser;
+        }
+    }
+    return kRoleUser;
+}
+
 bool AuthService::loadCredential()
 {
-    const auto rows =
-        pz::db::Database::instance().queryRows("SELECT username, password_hash, salt, must_change FROM local_users "
-                                               "WHERE username = 'admin' LIMIT 1");
-    if (!rows.empty() && rows.front().size() >= 4)
+    try
     {
-        m_username = rows.front()[0];
-        m_passwordHash = rows.front()[1];
-        m_salt = rows.front()[2];
-        m_mustChange = (rows.front()[3] == "t");
-        m_loaded = true;
-        return true;
+        const auto rows = pz::db::Database::instance().queryRows(
+            "SELECT count(*) FROM local_users WHERE password_hash <> ''");
+        m_loaded = !rows.empty() && !rows.front().empty() && rows.front()[0] != "0";
+    }
+    catch (const std::exception& ex)
+    {
+        LOG_WARN("local account count failed: {}", ex.what());
+        m_loaded = false;
     }
 
-    m_passwordHash.clear();
-    m_salt.clear();
-    m_mustChange = false;
-    m_loaded = false;
+    if (!m_loaded)
+        LOG_WARN("no readable local account — refusing logins until one is available (retrying)");
+    return m_loaded;
+}
 
-    LOG_WARN("no readable local_users credential — refusing logins until "
-             "it is available (retrying)");
+bool AuthService::adminSetupPending() const
+{
+    try
+    {
+        // Any account still on the password the seeder gave it. Only the seeded admin can be in
+        // that state — nothing else sets the flag — so this is the appliance asking whether its own
+        // first run is finished, which is why federated sign-in is not offered until it is.
+        const auto rows = pz::db::Database::instance().queryRows(
+            "SELECT count(*) FROM local_users WHERE must_change");
+        return !rows.empty() && !rows.front().empty() && rows.front()[0] != "0";
+    }
+    catch (const std::exception& ex)
+    {
+        LOG_WARN("admin setup check failed: {}", ex.what());
+    }
     return false;
 }
 
 AuthService::LoginResult AuthService::login(const std::string& username, const std::string& password)
 {
-    // Checked before the username comparison so a blocked window cannot be probed by varying
-    // the username, and before the hash so a blocked attempt costs nothing.
-    if (now() < m_throttle.nextAllowedAt)
+    // Checked before the hash so a blocked attempt costs nothing. Per username rather than per
+    // appliance: a global window meant one account being guessed at locked everyone else out.
+    if (throttled(username))
     {
         LoginResult blocked;
         blocked.throttled = true;
         return blocked;
     }
 
-    if (username != m_username)
+    const Stored account = readAccount(username);
+    if (!account.found || account.passwordHash.empty())
     {
+        // Deliberately not throttled and deliberately silent about which half was wrong. An
+        // unknown username never reaches the KDF, so it costs nothing to answer and there is
+        // nothing to rate-limit; saying so would also tell a caller which names exist.
         return {};
     }
 
-    if (m_passwordHash.empty() || !pz::util::verifyPassword(password, m_salt, m_passwordHash))
+    if (!pz::util::verifyPassword(password, account.salt, account.passwordHash))
     {
-        noteLoginFailure();
+        noteLoginFailure(username);
         return {};
     }
 
-    m_throttle = Throttle{};
+    m_throttles.erase(username);
 
     const auto sessionId = generateSessionId();
     if (sessionId.empty())
@@ -71,43 +138,66 @@ AuthService::LoginResult AuthService::login(const std::string& username, const s
         return {};
     }
 
-    m_sessions[sessionId] = Session{now() + m_sessionTtlSec, m_username};
+    Session session;
+    session.expiresAt = now() + m_sessionTtlSec;
+    session.username = account.username;
+    session.role = declaredRole(account.username);
+    session.mustChange = account.mustChange;
+    m_sessions[sessionId] = session;
+
+    LOG_INFO("sign-in (user={}, role={})", account.username, session.role);
 
     LoginResult result;
     result.success = true;
     result.sessionId = sessionId;
-    result.mustChange = m_mustChange;
-    result.rehashNeeded = pz::util::needsRehash(m_passwordHash);
+    result.mustChange = account.mustChange;
+    result.rehashNeeded = pz::util::needsRehash(account.passwordHash);
     return result;
 }
 
-void AuthService::noteLoginFailure()
+bool AuthService::throttled(const std::string& username)
 {
-    ++m_throttle.failures;
+    const auto it = m_throttles.find(username);
+    return it != m_throttles.end() && now() < it->second.nextAllowedAt;
+}
 
-    if (m_throttle.failures <= kFreeAttempts)
-    {
+void AuthService::noteLoginFailure(const std::string& username)
+{
+    // Bounded. Only names that got as far as the KDF land here — an unknown one returns before
+    // this — but an attacker who knows several real names could still grow the map, so the oldest
+    // window is dropped rather than letting it run.
+    if (m_throttles.size() >= kMaxThrottled && m_throttles.find(username) == m_throttles.end())
+        m_throttles.erase(m_throttles.begin());
+
+    Throttle& t = m_throttles[username];
+    ++t.failures;
+
+    if (t.failures <= kFreeAttempts)
         return;
-    }
 
     // Doubles per failure past the free allowance, capped — enough to make guessing
     // impractical without locking a fat-fingered operator out for the rest of the day.
     std::uint64_t delay = 1;
-    for (int i = kFreeAttempts + 1; i < m_throttle.failures && delay < kMaxBackoffSec; ++i)
-    {
+    for (int i = kFreeAttempts + 1; i < t.failures && delay < kMaxBackoffSec; ++i)
         delay *= 2;
-    }
     delay = std::min(delay, kMaxBackoffSec);
 
-    m_throttle.nextAllowedAt = now() + delay;
+    t.nextAllowedAt = now() + delay;
 
-    LOG_WARN("login throttled after {} consecutive failures (retry in {}s)", m_throttle.failures, delay);
+    LOG_WARN("login throttled for '{}' after {} consecutive failures (retry in {}s)", username,
+             t.failures, delay);
 }
 
 std::string AuthService::createSsoSession(const std::string& username)
 {
     const auto sessionId = generateSessionId();
-    m_sessions[sessionId] = Session{now() + m_sessionTtlSec, username};
+    Session session;
+    session.expiresAt = now() + m_sessionTtlSec;
+    session.username = username;
+    // Federated accounts are declared the same way local ones are, so the role comes from the
+    // same place. One that is not declared gets the lesser role rather than none at all.
+    session.role = declaredRole(username);
+    m_sessions[sessionId] = session;
     return sessionId;
 }
 
@@ -119,13 +209,28 @@ std::string AuthService::sessionUser(const std::string& sessionId) const
     return it->second.username;
 }
 
+std::string AuthService::sessionRole(const std::string& sessionId) const
+{
+    const auto it = m_sessions.find(sessionId);
+    if (it == m_sessions.end() || now() > it->second.expiresAt)
+        return {};
+    return it->second.role;
+}
+
+bool AuthService::mustChangePassword(const std::string& sessionId) const
+{
+    const auto it = m_sessions.find(sessionId);
+    if (it == m_sessions.end() || now() > it->second.expiresAt)
+        return false;
+    return it->second.mustChange;
+}
+
 bool AuthService::checkPassword(const std::string& username, const std::string& password) const
 {
-    if (username != m_username || m_passwordHash.empty())
-    {
+    const Stored account = readAccount(username);
+    if (!account.found || account.passwordHash.empty())
         return false;
-    }
-    return pz::util::verifyPassword(password, m_salt, m_passwordHash);
+    return pz::util::verifyPassword(password, account.salt, account.passwordHash);
 }
 
 AuthService::Credential AuthService::makeCredential(const std::string& newPassword) const
@@ -146,13 +251,6 @@ AuthService::Credential AuthService::makeCredential(const std::string& newPasswo
     }
 
     return cred;
-}
-
-void AuthService::applyCredential(const std::string& passwordHash, const std::string& salt)
-{
-    m_passwordHash = passwordHash;
-    m_salt = salt;
-    m_mustChange = false;
 }
 
 bool AuthService::validateSession(const std::string& sessionId)

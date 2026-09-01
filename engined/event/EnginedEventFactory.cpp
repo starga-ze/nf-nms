@@ -3,6 +3,7 @@
 #include "service/admin/AdminEvent.h"
 #include "service/apicredential/ApiCredentialEvent.h"
 #include "service/bootstrap/BootstrapEvent.h"
+#include "service/chat/ChatEvent.h"
 #include "service/collection/CollectionEvent.h"
 #include "service/commit/CommitEvent.h"
 #include "service/heartbeat/HeartbeatEvent.h"
@@ -74,7 +75,7 @@ std::unique_ptr<EnginedEvent> EnginedEventFactory::create(std::unique_ptr<pz::ip
     case pz::ipc::IpcCmd::SaseHealthResult:
         return std::make_unique<ProbeEvent>(ProbeEventType::ReceiveSaseHealthResult, std::move(msg));
 
-    case pz::ipc::IpcCmd::AdminPasswordUpdate:
+    case pz::ipc::IpcCmd::LocalUserUpdate:
         return std::make_unique<AdminEvent>(AdminEventType::ReceivePasswordUpdate, std::move(msg));
 
     case pz::ipc::IpcCmd::ApiCredentialStateUpdate:
@@ -85,6 +86,9 @@ std::unique_ptr<EnginedEvent> EnginedEventFactory::create(std::unique_ptr<pz::ip
 
     case pz::ipc::IpcCmd::ApiCollectionSample:
         return std::make_unique<CollectionEvent>(CollectionEventType::ReceiveSample, std::move(msg));
+
+    case pz::ipc::IpcCmd::ChatTurnStore:
+        return std::make_unique<ChatEvent>(ChatEventType::ReceiveTurn, std::move(msg));
 
     case pz::ipc::IpcCmd::SaseApiKeyUpdate:
         return std::make_unique<ApiCredentialEvent>(ApiCredentialEventType::ReceiveSaseApiKey, std::move(msg));

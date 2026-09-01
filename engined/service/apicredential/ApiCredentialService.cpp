@@ -154,10 +154,18 @@ void ApiCredentialService::storeState(const std::string& payloadJson)
         LOG_WARN("api_credential_state write failed (oid={})", oid);
 }
 
-// mgmtd sealed one of the assistant's vendor API keys and handed it over. Stored by id — 'openai',
-// 'google', 'anthropic' — one row per vendor, because a key is issued by the vendor and works for
-// every model they serve. Keyed rather than a singleton so a fourth vendor is a new row and not a
-// schema change.
+// mgmtd sealed one of the assistant's API keys and handed it over.
+//
+// Two stores, one path. `scope` picks between them: "provider" is the vendors' table, keyed by id —
+// 'openai', 'google', 'anthropic' — one row per vendor, because a key is issued by the vendor and
+// works for every model they serve; "guardrail" is the scan service's, a singleton the schema
+// enforces. They are the same shape and are written identically, so they share this handler rather
+// than a second command that would differ only in a table name — but they are separate tables
+// because a vendor row is one of a set an operator adds to, and the guardrail is a single fact
+// about this appliance.
+//
+// An unknown scope is dropped rather than defaulted. Defaulting would write a guardrail key into
+// the vendor table on a typo, where the next push would hand it to a model provider.
 void ApiCredentialService::storeAiCredential(const std::string& payloadJson)
 {
     nlohmann::json root;
@@ -178,6 +186,18 @@ void ApiCredentialService::storeAiCredential(const std::string& payloadJson)
         return;
     }
 
+    const std::string scope = root.value("scope", std::string("provider"));
+    const char* table = nullptr;
+    if (scope == "provider")
+        table = "ai_provider_credential_state";
+    else if (scope == "guardrail")
+        table = "ai_guardrail_credential_state";
+    else
+    {
+        LOG_WARN("AiCredentialStateUpdate with unknown scope '{}' (id={}) — dropping", scope, id);
+        return;
+    }
+
     // Removing a key is its own instruction, not an empty string: `key_enc` is COALESCEd below so
     // that a store carrying only a test result leaves the key alone, which means "" cannot also
     // mean "delete it". An operator taking a vendor out of service needs the key gone, not the row
@@ -185,13 +205,13 @@ void ApiCredentialService::storeAiCredential(const std::string& payloadJson)
     if (root.value("clear", false))
     {
         const bool cleared = pz::db::Database::instance().exec(
-            "UPDATE ai_provider_credential_state SET key_enc = NULL, last_test_at = NULL, "
+            std::string("UPDATE ") + table + " SET key_enc = NULL, last_test_at = NULL, "
             "last_test_ok = NULL, last_test_note = NULL, updated_at = now() WHERE id = $1",
             {id});
         if (cleared)
-            LOG_INFO("ai vendor credential cleared (id={})", id);
+            LOG_INFO("ai {} credential cleared (id={})", scope, id);
         else
-            LOG_WARN("ai_provider_credential_state clear failed (id={})", id);
+            LOG_WARN("{} clear failed (id={})", table, id);
         return;
     }
 
@@ -202,24 +222,25 @@ void ApiCredentialService::storeAiCredential(const std::string& payloadJson)
     const bool ok = root.value("ok", false);
     const std::string note = root.value("note", "");
 
+    const std::string t(table);
     const bool wrote = pz::db::Database::instance().exec(
-        "INSERT INTO ai_provider_credential_state (id, key_enc, last_test_at, last_test_ok, last_test_note) "
+        "INSERT INTO " + t + " (id, key_enc, last_test_at, last_test_ok, last_test_note) "
         "VALUES ($1, NULLIF($2,''), CASE WHEN $5::boolean THEN now() END, "
         "CASE WHEN $5::boolean THEN $3::boolean END, CASE WHEN $5::boolean THEN $4 END) "
         "ON CONFLICT (id) DO UPDATE SET "
-        "key_enc = COALESCE(EXCLUDED.key_enc, ai_provider_credential_state.key_enc), "
-        "last_test_at = COALESCE(EXCLUDED.last_test_at, ai_provider_credential_state.last_test_at), "
-        "last_test_ok = COALESCE(EXCLUDED.last_test_ok, ai_provider_credential_state.last_test_ok), "
-        "last_test_note = COALESCE(EXCLUDED.last_test_note, ai_provider_credential_state.last_test_note), "
+        "key_enc = COALESCE(EXCLUDED.key_enc, " + t + ".key_enc), "
+        "last_test_at = COALESCE(EXCLUDED.last_test_at, " + t + ".last_test_at), "
+        "last_test_ok = COALESCE(EXCLUDED.last_test_ok, " + t + ".last_test_ok), "
+        "last_test_note = COALESCE(EXCLUDED.last_test_note, " + t + ".last_test_note), "
         "updated_at = now()",
         {id, keyEnc, ok ? "true" : "false", note, hasTest ? "true" : "false"});
 
     // The key is never logged, and neither is its length — that alone narrows a guess.
     if (wrote)
-        LOG_INFO("gateway credential stored (id={}, test={}, key={})", id,
+        LOG_INFO("ai {} credential stored (id={}, test={}, key={})", scope, id,
                  hasTest ? (ok ? "ok" : "failed") : "none", keyEnc.empty() ? "unchanged" : "new");
     else
-        LOG_WARN("ai_provider_credential_state write failed (id={})", id);
+        LOG_WARN("{} write failed (id={})", table, id);
 }
 
 void ApiCredentialService::sendState(EnginedServiceManager& serviceManager, pz::ipc::IpcDaemon requester,

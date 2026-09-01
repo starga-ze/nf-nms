@@ -197,8 +197,17 @@
     // the operator entered sits in the browser until something else happens to be dirty.
     dirty: () => JSON.stringify(state.list) !== JSON.stringify(deployed) || pending.any(),
     payload: commitPayload,
-    before: () => ({ ai_providers: deployed }),
-    after: () => ({ ai_providers: state.list }),
+    // The staged keys appear in the diff as words, never as values.
+    //
+    // Not cosmetic: commitFlow returns early when `before` and `after` serialise the same, so a
+    // Publish that changed ONLY a key used to enable the button, open nothing, and store nothing.
+    // The key state has to be part of the diff for the flow to run at all — and putting it there
+    // is the honest thing anyway, because sealing a key is a change the review should show.
+    //
+    // "replaced" rather than "sealed" when one was already stored, so overwriting a key is a
+    // visible difference and not two identical lines.
+    before: () => ({ ai_providers: deployed, api_keys: keyStateView(false) }),
+    after: () => ({ ai_providers: state.list, api_keys: keyStateView(true) }),
     onPublished() {
       deployed = clone(state.list);
       window.NMS.draft.clear(DRAFT_KEY);
@@ -218,6 +227,18 @@
       return out;
     },
   });
+
+  // Every vendor's key as a word, before or after the staged changes are applied.
+  const keyStateView = (staged) => {
+    const out = {};
+    VENDORS.forEach(v => {
+      const sealed = keySealed(v.id);
+      if (!staged || !pending.has(v.id)) { out[v.label] = sealed ? 'sealed' : 'not set'; return; }
+      const value = pending.get(v.id);
+      out[v.label] = value === null ? 'not set' : (sealed ? 'sealed (replaced)' : 'sealed');
+    });
+    return out;
+  };
 
   // ── Key store ────────────────────────────────────────────────────────────────
   // Sent on Publish, never before. Drains `pending` once the commit has been accepted, one request
@@ -397,22 +418,24 @@
       meta.textContent = `${n} provider${n === 1 ? '' : 's'}`
         + (keys ? ` · ${keys} key change${keys > 1 ? 's' : ''} pending publish` : '');
     }
-    const add = document.getElementById('aiAdd');
-    if (add) {
-      const none = freeVendors(null).length === 0;
-      add.disabled = none;
-      add.title = none ? 'All three vendors are already configured' : '';
-    }
+    // The button stays live even with every vendor configured. It used to disable itself, and a
+    // dead button is a worse answer than an open panel: it says nothing about WHY, and the reason
+    // — these three are already here — is exactly what the panel shows by greying them out. The
+    // vendor list is short and fixed, so "all of them" is a state operators reach routinely.
   };
 
-  function removeEntry(idx) {
+  async function removeEntry(idx) {
     const p = state.list[idx];
     if (!p) return;
     const v = vendorOf(p.id);
     const sealed = keySealed(p.id);
-    if (!confirm(sealed
-      ? `Remove ${v.label}?\n\nIts stored API key is deleted on Publish as well.`
-      : `Remove ${v.label}?`)) return;
+    const ok = await window.NMS.confirm({
+      title: 'Remove provider',
+      message: `Remove ${v.label}?`,
+      detail: sealed ? 'Its stored API key is deleted on Publish as well.'
+                     : 'Nothing happens until you publish.',
+    });
+    if (!ok) return;
 
     state.list.splice(idx, 1);
     // A key outlives its row only if nobody says otherwise, and a provider nobody can see is a key
@@ -472,9 +495,19 @@
     const free = freeVendors(editIdx);
     // The vendor is fixed for the life of an entry: it is the id the key is sealed under and the
     // prefix on every model in it, so changing it would not be an edit but a different provider.
+    // Every vendor is listed, and the ones already configured are disabled in place rather than
+    // dropped. A list that silently omitted them left an operator with three vendors set up
+    // staring at an empty picker with nothing to tell them why; greyed-out rows that say
+    // "configured" answer the question in the place it is asked.
+    const taken = takenIds(editIdx);
     const picker = editIdx == null
       ? `<select data-f="id">
-           ${free.map(x => `<option value="${esc(x.id)}"${x.id === draft.id ? ' selected' : ''}>${esc(x.label)} · ${esc(x.family)}</option>`).join('')}
+           ${!free.length ? '<option value="" selected>Every vendor is already configured</option>' : ''}
+           ${VENDORS.map(x => {
+             const isTaken = taken.includes(x.id);
+             return `<option value="${esc(x.id)}"${isTaken ? ' disabled' : ''}${x.id === draft.id ? ' selected' : ''}>`
+                  + `${esc(x.label)} · ${esc(x.family)}${isTaken ? ' — already configured' : ''}</option>`;
+           }).join('')}
          </select>`
       : `<div class="ep-fixed">${esc(v.label)}<span class="lbl-sub">${esc(v.family)}</span></div>`;
 
@@ -493,6 +526,7 @@
     const body = document.getElementById('aiBody');
     if (!body || !draft) return;
     body.innerHTML = editorForm();
+    window.NMS.utils.clearInvalid(body);
     const note = document.getElementById('aiSaveNote');
     if (note) note.textContent = saveNote;
     window.NMS.utils.enhanceSelects(body);
@@ -502,9 +536,11 @@
   function openEditor(idx) {
     editIdx = idx;
     if (idx == null) {
+      // The first vendor not yet configured. With all of them taken there is nothing to select,
+      // and the draft opens on none — the picker below renders every option disabled and Save
+      // refuses, which reads as "there is nothing left to add" rather than as a broken button.
       const free = freeVendors(null);
-      if (!free.length) return;
-      draft = { id: free[0].id, models: [] };
+      draft = { id: free.length ? free[0].id : '', models: [] };
     } else {
       draft = clone(state.list[idx]);
     }
@@ -531,18 +567,24 @@
   };
 
   function saveEditor() {
-    if (!draft.models.length) {
-      saveNote = 'Select at least one model.';
+    // Says what is wrong at the foot of the panel and marks the field it is about — the note alone
+    // does not say WHICH, and in a form with a picker, a key and a model list that is the question.
+    const mark = (note, field) => {
+      saveNote = note;
       paintEditor();
-      return;
-    }
+      window.NMS.utils.markInvalid(document.getElementById('aiBody'), field);
+    };
+
+    // Reachable only from the all-configured case above, where the picker has nothing selectable.
+    if (!draft.id)
+      return mark('Every vendor is already configured — edit one of them instead.', '[data-f="id"]');
+
+    if (!draft.models.length)
+      return mark('Select at least one model.', '.mdl-pick, [data-model]');
     // A new provider with no key would be committed and then fail every turn, and the operator is
     // standing in the one panel where they can fix it.
-    if (editIdx == null && !keyDraft && !keySealed(draft.id)) {
-      saveNote = 'Enter the API key.';
-      paintEditor();
-      return;
-    }
+    if (editIdx == null && !keyDraft && !keySealed(draft.id))
+      return mark('Enter the API key.', '[data-k]');
 
     // The key leaves the panel the same way the rest of it does — staged, not applied. It goes to
     // its own store rather than into the entry, so it cannot reach the commit payload even by
@@ -617,9 +659,6 @@
 
         <div id="aiTable"></div>
 
-        <p class="cfg-foot-note">One entry per vendor. The endpoint is not configured here — it is a
-          fact about the vendor, held by the inference service. API keys are sealed on the appliance
-          and never travel in the configuration.</p>
       </div>
 
       <div class="slideover-overlay" id="aiOverlay"></div>

@@ -4,7 +4,6 @@
 
 #include "icmp/IcmpEngine.h"
 #include "ipc/IpcClient.h"
-#include "util/ThreadManager.h"
 
 #include "action/ProbedActionFactory.h"
 #include "event/ProbedEventFactory.h"
@@ -34,7 +33,6 @@ protected:
 
 private:
 
-    std::unique_ptr<pz::util::ThreadManager> m_threadManager;
     std::unique_ptr<pz::ipc::IpcClient> m_ipcClient;
     std::unique_ptr<IcmpEngine> m_icmpEngine;
     std::unique_ptr<boost::asio::io_context> m_ioContext;

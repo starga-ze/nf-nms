@@ -23,79 +23,25 @@ CREATE TABLE IF NOT EXISTS running_config (
     state        TEXT        NOT NULL DEFAULT 'active'
         CONSTRAINT running_config_state_check CHECK (state IN ('pending','active','superseded'))
 );
--- Upgrade path for databases created before running_config.state existed (config-
--- version convergence: 'pending' on commit, 'active' once the fleet has converged).
-ALTER TABLE running_config ADD COLUMN IF NOT EXISTS state TEXT NOT NULL DEFAULT 'active';
-DO $rc_state$
-BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'running_config_state_check') THEN
-        ALTER TABLE running_config
-            ADD CONSTRAINT running_config_state_check CHECK (state IN ('pending','active','superseded'));
-    END IF;
-END $rc_state$;
--- Identity-column naming: every configuration object has exactly ONE identity, `oid` — a UUID
--- string issued at creation. Rename pre-existing `id` columns on the persistent tables
--- (projections are drop+recreated).
-DO $rename_oid$
-BEGIN
-    IF EXISTS (SELECT 1 FROM information_schema.columns
-               WHERE table_name = 'startup_config' AND column_name = 'id') THEN
-        ALTER TABLE startup_config RENAME COLUMN id TO oid;
-    END IF;
-    IF EXISTS (SELECT 1 FROM information_schema.columns
-               WHERE table_name = 'running_config' AND column_name = 'id') THEN
-        ALTER TABLE running_config RENAME COLUMN id TO oid;
-    END IF;
-END $rename_oid$;
--- Single-identity merge: objects used to carry `uuid` plus a separate numeric `oid`. Fold uuid
--- into oid and drop the numeric one across every persisted version and the baseline.
-DO $merge_oid$
-DECLARE
-    tbl  TEXT;
-    spec TEXT;
-    path TEXT[];
-BEGIN
-    FOREACH tbl IN ARRAY ARRAY['running_config', 'startup_config'] LOOP
-        FOREACH spec IN ARRAY ARRAY['probed.service.probe.probe_targets',
-                                    'collectord.service.api.auth_profiles',
-                                    'collectord.service.api.connectors',
-                                    'engined.service.site.sites'] LOOP
-            path := string_to_array(spec, '.');
-            EXECUTE format($fmt$
-                UPDATE %I SET config_json = jsonb_set(config_json, %L, (
-                    SELECT COALESCE(jsonb_agg(
-                        CASE WHEN elem ? 'uuid'
-                             THEN (elem - 'uuid') || jsonb_build_object('oid', elem->'uuid')
-                             ELSE elem END), '[]'::jsonb)
-                    FROM jsonb_array_elements(config_json #> %L) AS elem))
-                WHERE jsonb_typeof(config_json #> %L) = 'array'
-                  AND EXISTS (SELECT 1 FROM jsonb_array_elements(config_json #> %L) AS e
-                              WHERE e ? 'uuid')
-            $fmt$, tbl, path, path, path, path);
-        END LOOP;
-    END LOOP;
-END $merge_oid$;
--- Local login accounts (operator credentials), stored hashed. A non-versioned store
--- (NOT running_config) so password changes don't pollute the config version history.
--- Keyed by username so it extends to multiple local users / a future CLI daemon.
-DROP TABLE IF EXISTS admin_user;
+-- The local accounts' secrets. Which accounts exist is declared in running_config
+-- (pretzel.user.list) and this holds only what proves one, keyed by the same oid.
+--
+--   username  the login handle. Primary key because it is what someone types and what every read
+--             here is by. It is NOT an identity: a name can be given up and taken by someone else.
+--   oid       the identity. Issued once at creation, never updated, and what durable ownership —
+--             a person's assistant conversations — is keyed on.
 CREATE TABLE IF NOT EXISTS local_users (
     username      TEXT PRIMARY KEY,
+    oid           TEXT NOT NULL UNIQUE DEFAULT gen_random_uuid()::text,
     password_hash TEXT NOT NULL,
     salt          TEXT NOT NULL,
-    must_change   BOOLEAN NOT NULL DEFAULT true,
+    -- True only for the account the seeder creates, and only until someone signs in as it and
+    -- replaces the factory password. An account made from the console is never in this state:
+    -- a forced change is what "this appliance has not been set up" looks like, and it would mean
+    -- nothing if a routine account creation raised it too.
+    must_change   BOOLEAN NOT NULL DEFAULT false,
     updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
--- Legacy tables removed: probe_devices (mixed ICMP status + discovered SNMP/interface/
--- LLDP data) and state_snapshot (heartbeat snapshot that was written but never read).
-DROP TABLE IF EXISTS probe_devices;
-DROP TABLE IF EXISTS state_snapshot;
--- device_credentials was an abandoned first pass at the encrypted credential store: no DDL, no
--- reader, no writer, and it survived every reset because nothing listed it. It held cipher text
--- nothing could decrypt, so it goes. api_credential_state/api_endpoint_state were declared before they
--- had a writer; see the note further down.
-DROP TABLE IF EXISTS device_credentials;
-DROP TABLE IF EXISTS api_endpoint_state;
 -- ── Config vs state ─────────────────────────────────────────────────────────────
 -- running_config holds what the OPERATOR declared: sites, devices, API keys, endpoints,
 -- connectors. It is append-versioned, diffed before publish and revertable, so only things a
@@ -109,83 +55,6 @@ DROP TABLE IF EXISTS api_endpoint_state;
 -- Devices projected from running_config, plus live reachability. A pure projection (rebuilt
 -- from config on every reload). NGFW and SASE are separate tables (the table IS the type, no
 -- device_type discriminator); each row mixes projected config fields with runtime state.
-DROP TABLE IF EXISTS inventory;
-DROP TABLE IF EXISTS devices;
-CREATE TABLE IF NOT EXISTS ngfw_device (
-    oid         TEXT PRIMARY KEY,
-    site        TEXT,
-    target      TEXT,
-    name        TEXT,
-    description TEXT,
-    fingerprint TEXT,
-    status      TEXT,
-    last_seen   TIMESTAMPTZ,
-    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-CREATE UNIQUE INDEX IF NOT EXISTS ngfw_device_target_uniq ON ngfw_device (target)
-    WHERE target IS NOT NULL AND target <> '';
-CREATE TABLE IF NOT EXISTS sase_device (
-    oid           TEXT PRIMARY KEY,
-    site          TEXT,
-    target        TEXT,
-    name          TEXT,
-    description   TEXT,
-    health_url    TEXT,
-    health_body   TEXT,
-    api_key_enc   TEXT,
-    status        TEXT,
-    last_seen     TIMESTAMPTZ,
-    egress_result JSONB,
-    updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-CREATE UNIQUE INDEX IF NOT EXISTS sase_device_target_uniq ON sase_device (target)
-    WHERE target IS NOT NULL AND target <> '';
-DO $split_devices$
-DECLARE tbl TEXT;
-BEGIN
-    FOREACH tbl IN ARRAY ARRAY['running_config', 'startup_config'] LOOP
-        EXECUTE format($fmt$
-            UPDATE %I SET config_json = jsonb_set(
-                jsonb_set(
-                    config_json #- '{engined,service,site,devices}',
-                    '{engined,service,site,ngfw_devices}',
-                    COALESCE((SELECT jsonb_agg(e - 'device_type')
-                              FROM jsonb_array_elements(config_json #> '{engined,service,site,devices}') e
-                              WHERE e->>'device_type' IS DISTINCT FROM 'sase'), '[]'::jsonb)),
-                '{engined,service,site,sase_devices}',
-                COALESCE((SELECT jsonb_agg((e - 'device_type') - 'api_key')
-                          FROM jsonb_array_elements(config_json #> '{engined,service,site,devices}') e
-                          WHERE e->>'device_type' = 'sase'), '[]'::jsonb))
-            WHERE config_json #> '{engined,service,site}' ? 'devices'
-        $fmt$, tbl);
-    END LOOP;
-END $split_devices$;
-
--- What pretzel learns about a device API key, as opposed to what the operator declared. The
--- declaration (name, device, endpoint, account) lives in running_config; the issued secret and
--- its verification history live here, because running_config is append-versioned, shown verbatim
--- in the review diff and exported by Save-to-file — a key written there would be permanent,
--- readable by every reviewer, and would mint a configuration version each time it was re-issued.
--- Same reasoning that keeps admin passwords in local_users.
---
--- Written only by engined; the values arrive already sealed over IPC (collectord seals them with
--- /etc/pretzel/credentials.key, the one process that holds a plaintext credential). Keyed by the
--- API Key oid. A single schema serves both device types: for ngfw the durable secret is the issued
--- key; for sase it is the tenant OAuth credential (the bearer token stays ephemeral in memory).
---   id_enc     : account identity  — ngfw username / sase client id     (AES-256-GCM, base64)
---   pw_enc     : account secret    — ngfw password / sase client secret (AES-256-GCM, base64)
---   key_enc : issued key/token  — AES-256-GCM, base64(nonce ‖ tag ‖ ciphertext). A database copy
---                without credentials.key is useless.
---   expires_at : NULL means no expiry — PAN-OS keys are indefinite unless an API key lifetime is
---                configured on the device.
--- Rename from the pre-"credential" table name, preserving rows, before the CREATE below no-ops.
-DO $rename_credstate$
-BEGIN
-    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'api_key_state')
-       AND NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'api_credential_state') THEN
-        ALTER TABLE api_key_state RENAME TO api_credential_state;
-    END IF;
-END $rename_credstate$;
 CREATE TABLE IF NOT EXISTS api_credential_state (
     oid            TEXT PRIMARY KEY,
     id_enc         TEXT,
@@ -198,51 +67,31 @@ CREATE TABLE IF NOT EXISTS api_credential_state (
     last_test_note TEXT,
     updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
 );
--- Upgrade path for databases created before the credential columns existed.
-ALTER TABLE api_credential_state ADD COLUMN IF NOT EXISTS id_enc TEXT;
-ALTER TABLE api_credential_state ADD COLUMN IF NOT EXISTS pw_enc TEXT;
-DO $rename_keyenc$
-BEGIN
-    IF EXISTS (SELECT 1 FROM information_schema.columns
-               WHERE table_name = 'api_credential_state' AND column_name = 'secret_enc')
-       AND NOT EXISTS (SELECT 1 FROM information_schema.columns
-               WHERE table_name = 'api_credential_state' AND column_name = 'key_enc') THEN
-        ALTER TABLE api_credential_state RENAME COLUMN secret_enc TO key_enc;
-    END IF;
-END $rename_keyenc$;
-
--- Renamed from ai_gateway_credential_state: it never held a gateway's credential in production,
--- and once the assistant became "one row per AI provider" the old name described an arrangement
--- that no longer existed. Guarded so an upgrade renames and a fresh install just creates.
-DO $rename_ai_cred$
-BEGIN
-    IF EXISTS (SELECT 1 FROM information_schema.tables
-               WHERE table_name = 'ai_gateway_credential_state')
-       AND NOT EXISTS (SELECT 1 FROM information_schema.tables
-               WHERE table_name = 'ai_provider_credential_state') THEN
-        ALTER TABLE ai_gateway_credential_state RENAME TO ai_provider_credential_state;
-    END IF;
-END $rename_ai_cred$;
-
--- The AI providers' API keys, sealed. Same reasoning that keeps issued device keys out of
--- running_config: a key is the customer's own vendor subscription, it is re-issued and rotated on
--- its own schedule, and running_config is append-versioned, shown verbatim in the review diff and
--- written out by Save-to-file — a key there would be permanent and readable by every reviewer, and
--- rotating it would mint a configuration version.
---
--- What DOES live in running_config is the declaration around it: which vendors are configured and
--- which of their models this appliance may ask for. Those are choices an operator makes and
--- should see diffed; this table holds only the secret and the record of whether it last worked.
---
--- One row per provider — 'openai', 'google', 'anthropic' — because a key is issued by the vendor
--- and works for every model they serve. Keyed rather than a singleton so a fourth vendor does not
--- need a schema change to sit beside the first three.
---
--- Written only by engined, and the value arrives already sealed: mgmtd seals it with
--- /etc/pretzel/credentials.key, exactly as collectord does for device credentials, so the plaintext
--- crosses the socket once on entry and never on use.
 CREATE TABLE IF NOT EXISTS ai_provider_credential_state (
     id             TEXT PRIMARY KEY,
+    key_enc        TEXT,            -- AES-256-GCM, base64(nonce ‖ tag ‖ ciphertext)
+    last_test_at   TIMESTAMPTZ,
+    last_test_ok   BOOLEAN,
+    last_test_note TEXT,
+    updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- The guardrail's API key, sealed the same way and for the same reasons as the providers' above.
+--
+-- Its own table rather than a reserved id in that one. The two are the same shape and could have
+-- shared, but they are not the same kind of thing: a provider row is one of a set an operator adds
+-- to and removes from, and the guardrail is a single fact about this appliance — there is one scan
+-- service, and a second row here would not mean anything. Sharing would also have made every query
+-- that means "the vendors" carry a filter to exclude the one row that is not a vendor, which is the
+-- shape of bug that gets written once and found much later.
+--
+-- Two rows at most, and the check says which: 'airs' is the scan service's subscription, 'portkey'
+-- the AI gateway's. Both are configured on the same console page and both are a single fact about
+-- this appliance rather than one of a set, which is what separates them from the vendors next door.
+-- Enumerated rather than left open so a caller that thought it was writing a keyed store cannot
+-- invent a third id nothing downstream reads.
+CREATE TABLE IF NOT EXISTS ai_guardrail_credential_state (
+    id             TEXT PRIMARY KEY CHECK (id IN ('airs', 'portkey')),
     key_enc        TEXT,            -- AES-256-GCM, base64(nonce ‖ tag ‖ ciphertext)
     last_test_at   TIMESTAMPTZ,
     last_test_ok   BOOLEAN,
@@ -274,8 +123,6 @@ CREATE TABLE IF NOT EXISTS api_collection (
     error         TEXT,
     body_aged     BOOLEAN     NOT NULL DEFAULT false
 );
-ALTER TABLE api_collection ADD COLUMN IF NOT EXISTS body_aged BOOLEAN NOT NULL DEFAULT false;
--- Time-series read paths: latest samples for a connector, and one endpoint's history.
 CREATE INDEX IF NOT EXISTS api_collection_conn_time ON api_collection (connector_oid, collected_at DESC);
 CREATE INDEX IF NOT EXISTS api_collection_endpoint_time ON api_collection (endpoint_oid, collected_at DESC);
 -- The Insight ▸ API Collection read path and the body-retention sweep both address ONE stream
@@ -283,6 +130,55 @@ CREATE INDEX IF NOT EXISTS api_collection_endpoint_time ON api_collection (endpo
 -- filter-and-sort over the whole connector's history.
 CREATE INDEX IF NOT EXISTS api_collection_stream_time
     ON api_collection (connector_oid, endpoint_oid, collected_at DESC);
+
+-- The assistant's conversations.
+--
+-- They lived in the operator's browser until now (localStorage), which meant they were lost on
+-- logout, invisible from a second machine, and capped by a browser quota. None of those are
+-- properties anyone chose; they were what "we have not built this yet" looked like.
+--
+-- State, not configuration: system-produced, never operator-declared, so it lives here rather than
+-- in running_config — the same split that keeps issued API keys out of the versioned document.
+--
+-- Owned by `local_users.oid` and NOT by the username. A name can be given up and taken by someone
+-- else, and anything owned by "kim" would then belong to whoever is called kim next. The oid is
+-- issued once at account creation and never updated, which is what makes it safe to own things by.
+--
+-- What deletes a conversation: the person deletes it, or it passes the retention window. Signing
+-- out does not, and that is the whole point of it being here.
+CREATE TABLE IF NOT EXISTS chat_session (
+    oid        TEXT        PRIMARY KEY,   -- minted by the browser, like every other object here
+    owner      TEXT        NOT NULL REFERENCES local_users(oid) ON DELETE CASCADE,
+    service    TEXT        NOT NULL,      -- 'chat' | 'agent'
+    title      TEXT        NOT NULL DEFAULT '',
+    model      TEXT        NOT NULL DEFAULT '',
+    draft      TEXT        NOT NULL DEFAULT '',  -- what is typed and not yet sent
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+-- The rail lists a person's conversations newest-first and reads no messages to do it.
+CREATE INDEX IF NOT EXISTS chat_session_owner ON chat_session (owner, updated_at DESC);
+
+-- One row per half-turn: what was asked, and what came back.
+--
+-- `scan` is the AIRS verdict, whole. It is most of the reason this table exists — a blocked turn's
+-- findings used to disappear with the browser that held them, which made the one turn worth going
+-- back to the one that could not be.
+CREATE TABLE IF NOT EXISTS chat_message (
+    oid        TEXT        PRIMARY KEY,
+    session    TEXT        NOT NULL REFERENCES chat_session(oid) ON DELETE CASCADE,
+    seq        INTEGER     NOT NULL,
+    role       TEXT        NOT NULL,      -- 'user' | 'assistant'
+    content    TEXT        NOT NULL,
+    model      TEXT,                      -- which model answered THIS turn
+    ok         BOOLEAN,                   -- assistant rows only
+    code       TEXT,                      -- BLOCKED, UNREACHABLE, …
+    latency_ms INTEGER,
+    scan       JSONB,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (session, seq)
+);
+CREATE INDEX IF NOT EXISTS chat_message_session ON chat_message (session, seq);
 
 -- System logs: a structured, queryable copy of each daemon's spdlog file. engined tails the rotating
 -- log files from a checkpoint (system_log_offset) and batch-inserts parsed rows here — the files stay
@@ -313,34 +209,40 @@ CREATE TABLE IF NOT EXISTS system_log_offset (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- One-time config-json normalizations (idempotent; run by engined via Config::preflight).
+-- The declaration of a seeded account, which the seeder cannot write itself.
+--
+-- Not a migration. seedStore() writes running_config from startup-config.json and only then seeds
+-- the default admin into local_users — so at the moment the document is written there is no account
+-- to declare, and a fresh appliance would come up with an admin nobody can see or edit. This runs
+-- afterwards, on every preflight, and is a no-op once the domain exists.
 DO $migrate$
 BEGIN
-    -- Daemon rename (snmpd -> collectord): move the top-level config section so the renamed
-    -- daemon finds its settings across every running_config version and the startup_config
-    -- baseline. Idempotent — once moved, the `? 'snmpd'` guard is false.
+    -- Which accounts exist is declared in running_config (pretzel.user.list) and local_users holds
+    -- only what proves one. Seeded from the table, so the declaration names whatever the seeder
+    -- created, and guarded on the domain's absence so an operator's later edits are never touched.
+    --
+    -- The seeded account is an admin: it is the only way in on a fresh appliance, and an appliance
+    -- whose first account could not manage accounts would have no way to make a second one.
     UPDATE running_config SET config_json =
-        (config_json - 'snmpd') || jsonb_build_object('collectord', config_json->'snmpd')
-        WHERE config_json ? 'snmpd';
-    UPDATE startup_config SET config_json =
-        (config_json - 'snmpd') || jsonb_build_object('collectord', config_json->'snmpd')
-        WHERE config_json ? 'snmpd';
-    -- Drop the dead ipcd.service.daemon_map: routing uses the compiled IpcDaemon enum,
-    -- never this config key. Strip the stale nested key from every persisted version.
-    UPDATE running_config SET config_json = config_json #- '{ipcd,service,daemon_map}'
-        WHERE config_json #> '{ipcd,service}' ? 'daemon_map';
-    UPDATE startup_config SET config_json = config_json #- '{ipcd,service,daemon_map}'
-        WHERE config_json #> '{ipcd,service}' ? 'daemon_map';
-    -- API key -> credential rename: move collectord.service.api.api_keys to .api_credentials in every
-    -- persisted version and the baseline. Idempotent — once moved, the `? 'api_keys'` guard is false.
+        jsonb_set(config_json, '{pretzel,user}',
+                  jsonb_build_object('list', COALESCE(
+                      (SELECT jsonb_agg(jsonb_build_object('oid', u.oid, 'username', u.username,
+                                                           'role', 'admin')
+                              ORDER BY u.username)
+                         FROM local_users u), '[]'::jsonb)), true)
+        WHERE NOT (config_json #> '{pretzel}' ? 'user');
+
+    -- A declared account with no role. Roles arrived after the declaration did, and before them
+    -- every account had full access — so the honest reading of an absent role is the one that takes
+    -- nothing away, and an operator demotes from the console. The alternative, defaulting to the
+    -- lesser role, would sign the appliance's only admin out of account management on upgrade.
     UPDATE running_config SET config_json =
-        jsonb_set(config_json, '{collectord,service,api,api_credentials}', config_json #> '{collectord,service,api,api_keys}', true)
-            #- '{collectord,service,api,api_keys}'
-        WHERE config_json #> '{collectord,service,api}' ? 'api_keys';
-    UPDATE startup_config SET config_json =
-        jsonb_set(config_json, '{collectord,service,api,api_credentials}', config_json #> '{collectord,service,api,api_keys}', true)
-            #- '{collectord,service,api,api_keys}'
-        WHERE config_json #> '{collectord,service,api}' ? 'api_keys';
+        jsonb_set(config_json, '{pretzel,user,list}',
+                  (SELECT COALESCE(jsonb_agg(
+                              CASE WHEN u ? 'role' THEN u
+                                   ELSE u || jsonb_build_object('role', 'admin') END), '[]'::jsonb)
+                     FROM jsonb_array_elements(config_json #> '{pretzel,user,list}') AS u), true)
+        WHERE jsonb_path_exists(config_json, '$.pretzel.user.list[*] ? (!exists(@.role))');
 END $migrate$;
 )SQL";
 

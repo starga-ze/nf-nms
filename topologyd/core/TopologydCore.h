@@ -3,7 +3,6 @@
 #include "core/Core.h"
 
 #include "ipc/IpcClient.h"
-#include "util/ThreadManager.h"
 
 #include "action/TopologydActionFactory.h"
 #include "event/TopologydEventFactory.h"
@@ -31,7 +30,6 @@ protected:
 
 private:
 
-    std::unique_ptr<pz::util::ThreadManager> m_threadManager;
     std::unique_ptr<pz::ipc::IpcClient> m_ipcClient;
 
     std::unique_ptr<TopologydEventFactory> m_eventFactory;

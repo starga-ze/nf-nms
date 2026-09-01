@@ -101,12 +101,14 @@ const char* IpcProtocol::cmdToStr(IpcCmd cmd) noexcept
         return "SettingsCommitResponse";
     case IpcCmd::SettingsCommitStatus:
         return "SettingsCommitStatus";
+    case IpcCmd::ChatTurnStore:
+        return "ChatTurnStore";
     case IpcCmd::ScanRequest:
         return "ScanRequest";
     case IpcCmd::ScanResult:
         return "ScanResult";
-    case IpcCmd::AdminPasswordUpdate:
-        return "AdminPasswordUpdate";
+    case IpcCmd::LocalUserUpdate:
+        return "LocalUserUpdate";
     case IpcCmd::ApiCredentialStateUpdate:
         return "ApiCredentialStateUpdate";
     case IpcCmd::ApiKeygenRequest:
@@ -202,7 +204,8 @@ CmdCategory IpcProtocol::classify(IpcCmd cmd) noexcept
 
     // Mutate engined's store — dst must be Engined.
     case IpcCmd::SettingsCommitRequest:
-    case IpcCmd::AdminPasswordUpdate:
+    case IpcCmd::ChatTurnStore:
+    case IpcCmd::LocalUserUpdate:
     case IpcCmd::ProbeResult:
     case IpcCmd::ScanResult:
     case IpcCmd::ApiCredentialStateUpdate:

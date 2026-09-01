@@ -75,8 +75,10 @@
   // localStorage, so the swap is one object rather than a search through this file. The interface
   // is already async for the same reason — a server-backed store cannot be made synchronous later
   // without touching every caller.
-  const STORE_KEY = 'pz.chat.v1';
-  window.NMS.clearOnLogout(STORE_KEY);
+  // Preferences, not conversations. The conversations are on the appliance now — see `threads`
+  // below — which is why signing out no longer takes them with it.
+  const PREFS_KEY = 'pz.chat.prefs.v1';
+  window.NMS.clearOnLogout(PREFS_KEY);
   // The mock's own profile name. Deliberately not a plausible-looking real one: an inspector
   // that named a corporate profile under a browser regex would be inventing provenance.
   const PROFILE = 'local-mock';
@@ -440,7 +442,7 @@
   // ── State ──────────────────────────────────────────────────────────────────
 
   const state = {
-    convos: [],        // [{ id, title, createdAt, updatedAt, messages: [] }]
+    convos: [],        // [{ id, title, model, mode, draft, count, messages, loaded }]
     activeId: '',
     model: FALLBACK_MODELS[0].id,
     railOpen: true,
@@ -452,55 +454,127 @@
     mode: 'chat',      // 'chat' | 'agent' — which service the rail is showing
   };
 
-  // The one place that knows where threads are kept. Everything else calls load()/save() and does
-  // not know, which is what makes the move to the appliance database a change to this object.
+  // Where a conversation lives, and where a preference lives — two different answers.
   //
-  // Async on both halves although localStorage is not: a server-backed read is a fetch, and a
-  // caller written against a synchronous read would have to be found and rewritten. Awaiting a
-  // resolved promise costs a microtask.
+  // The conversations are on the appliance: chat_session / chat_message, owned by the account's
+  // oid. They used to be in this browser, which meant they were lost on sign-out, invisible from a
+  // second machine, and capped by a browser quota. Nothing about that was chosen; it was what "not
+  // built yet" looked like. Only two things remove one now — the person, and the retention window.
+  //
+  // What stays in the browser is which conversation was open on THIS machine, which model the
+  // picker is on, and whether the rail is showing. Those are properties of a browser rather than
+  // of a person, and syncing them across machines would be the wrong behaviour rather than a
+  // missing feature.
+  //
+  // Turns are not written from here. mgmtd files a completed turn as it hands the answer back
+  // (ChatController::result) — the question and who asked it are facts that side established, and
+  // a client that re-stated them could state them differently.
   const threads = {
-    async read() {
-      try {
-        return JSON.parse(localStorage.getItem(STORE_KEY) || '{}');
-      } catch (_) { return {}; }   // corrupt or absent — start clean
+    async list() {
+      const r = await fetch('/api/chat/sessions', { credentials: 'same-origin',
+                                                    headers: { Accept: 'application/json' } });
+      if (r.status === 401) { location.href = '/'; return []; }
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return (await r.json()).sessions || [];
     },
-    async write(doc) {
-      try {
-        localStorage.setItem(STORE_KEY, JSON.stringify(doc));
-      } catch (_) { /* quota or private mode — the session still works, it just will not survive */ }
+    async messages(oid) {
+      const r = await fetch('/api/chat/session?oid=' + encodeURIComponent(oid),
+                            { credentials: 'same-origin', headers: { Accept: 'application/json' } });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return (await r.json()).messages || [];
     },
-    // The cap exists because this store is a browser quota. A server-backed one drops it and prunes
-    // on a retention window instead, the way api_collection does.
-    CAP: 30,
+    // Fire-and-forget. A rename or a draft is never on the path of anything the operator is
+    // waiting for, and awaiting it inside keystroke handling would put a round trip there.
+    patch(oid, fields) {
+      fetch('/api/chat/session/patch', {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ oid, ...fields }),
+      }).catch(() => {});
+    },
+    async remove(oid) {
+      await fetch('/api/chat/session/delete', {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ oid }),
+      }).catch(() => {});
+    },
   };
 
+  // The browser's own preferences. Registered for clearing on sign-out the way every per-person
+  // key is: the next person to sign in on this machine should not open the console on someone
+  // else's last conversation.
+  const prefs = {
+    read() {
+      try { return JSON.parse(localStorage.getItem(PREFS_KEY) || '{}'); } catch (_) { return {}; }
+    },
+    write(doc) {
+      try { localStorage.setItem(PREFS_KEY, JSON.stringify(doc)); } catch (_) { /* private mode */ }
+    },
+  };
+
+  // One conversation as this page holds it. `messages` is empty until the conversation is opened —
+  // the rail draws from the list alone and reads none, which is what keeps opening the page one
+  // request rather than one per conversation.
+  function convoFromRow(row) {
+    return {
+      id: row.oid,
+      title: row.title || '',
+      model: row.model || '',
+      mode: row.service || 'chat',
+      draft: row.draft || '',
+      createdAt: row.created_at || '',
+      updatedAt: row.updated_at || '',
+      count: row.messages || 0,
+      messages: [],
+      loaded: (row.messages || 0) === 0,
+    };
+  }
+
+  // A stored message in the shape the thread renderer already reads.
+  function msgFromRow(row) {
+    const m = { id: row.oid, role: row.role, kind: 'text', text: row.content || '',
+                ts: row.created_at || '' };
+    if (row.model) m.model = row.model;
+    if (row.code) m.code = row.code;
+    if (typeof row.ok === 'boolean') m.ok = row.ok;
+    if (typeof row.latency_ms === 'number') m.latencyMs = row.latency_ms;
+    if (row.scan) m.scan = row.scan;
+    return m;
+  }
+
   async function load() {
-    const raw = await threads.read();
-    if (Array.isArray(raw.convos)) state.convos = raw.convos;
-    // A wait bubble belongs to a turn in flight, and no turn survives the page. Stored ones are
-    // debris from a reload mid-answer: harmless before, but the elapsed counter would now sit
-    // there counting up from a timestamp in a session that ended.
-    state.convos.forEach(c => {
-      if (Array.isArray(c.messages)) c.messages = c.messages.filter(m => m.kind !== 'wait');
-    });
-    // Not validated here: the catalog has not arrived yet, and dropping a stored choice
-    // against the one-entry fallback would reset every operator to the first model on load.
-    // loadCatalog() checks it once the real list is in.
+    const raw = prefs.read();
     if (raw.activeId) state.activeId = raw.activeId;
     if (raw.model) state.model = raw.model;
     if (raw.mode === 'chat' || raw.mode === 'agent') state.mode = raw.mode;
     if (typeof raw.badges === 'boolean') state.badges = raw.badges;
     if (typeof raw.railOpen === 'boolean') state.railOpen = raw.railOpen;
+
+    try {
+      state.convos = (await threads.list()).map(convoFromRow);
+    } catch (_) {
+      // The rail is empty rather than wrong. A conversation that could not be listed still exists
+      // on the appliance, and inventing a local one to stand in its place would create a second
+      // conversation the moment anyone typed.
+      state.convos = [];
+    }
   }
 
-  // Fire-and-forget by design: a save is never on the path of anything the operator is waiting
-  // for, and awaiting it at every call site would put a round trip inside keystroke handling once
-  // the store is remote.
+  // The conversation's messages, fetched the first time it is opened. A conversation created in
+  // this browser and not yet answered has nothing to fetch — `loaded` is already true.
+  async function ensureLoaded(c) {
+    if (!c || c.loaded) return;
+    try {
+      c.messages = (await threads.messages(c.id)).map(msgFromRow);
+      c.loaded = true;
+    } catch (_) { /* left unloaded; the next open tries again */ }
+  }
+
+  // Preferences only. Fire-and-forget by design: a save is never on the path of anything the
+  // operator is waiting for.
   function save() {
-    threads.write({
-      convos: state.convos.slice(0, threads.CAP),
-      // Persisted so a reload can put the operator back where they were. Whether it is USED is
-      // decided at load — see the navigation-type check there.
+    prefs.write({
       activeId: state.activeId,
       model: state.model, mode: state.mode,
       badges: state.badges, railOpen: state.railOpen,
@@ -703,11 +777,16 @@
         'Delete session',
         `${c.title ? `“${c.title}”` : 'This session'} will be deleted`
           + (n ? ` along with its ${n} message${n === 1 ? '' : 's'}` : '')
-          + '. Sessions are stored in this browser only, so this cannot be undone.',
+          + '. This cannot be undone.',
         'Delete',
         () => deleteConvo(id, true));
       return;
     }
+    // The appliance holds it, so the appliance is told. Not awaited: the rail should not sit
+    // there while a delete goes out, and the row is gone from the list either way — a request
+    // that failed leaves a conversation that reappears on the next load, which is the honest
+    // outcome and not a lost one.
+    threads.remove(id);
     state.convos.splice(i, 1);
     // Deleting the open thread has to leave one open. Falling back to the neighbour rather than
     // always minting a fresh conversation avoids burning a session id on a click that was about
@@ -722,13 +801,16 @@
     renderThread();
   }
 
-  function selectConvo(id) {
-    if (!state.convos.some(c => c.id === id) || state.activeId === id) return;
+  async function selectConvo(id) {
+    const c = state.convos.find(x => x.id === id);
+    if (!c || state.activeId === id) return;
     state.activeId = id;
     state.inspectId = '';
     save();
     renderRail();
-    renderThread();
+    renderThread();          // draws the empty thread while the messages are on their way
+    await ensureLoaded(c);
+    if (state.activeId === id) renderThread();
   }
 
   function findMessage(id) {
@@ -2006,7 +2088,7 @@
     renderThread(true);
   }
 
-  async function askServer(text, model, history, sessionId, onDelta, ctl) {
+  async function askServer(text, model, history, sessionId, onDelta, ctl, meta) {
     // Not an error the operator needs explained — they caused it. It travels as one so it unwinds
     // the same path every other outcome does, and send() picks it out by code.
     const aborted = () => gwError('중단했습니다', 'ABORTED', false);
@@ -2026,6 +2108,14 @@
           // gateway, which passes it to Prisma AIRS as tr_id. Sent per turn because it is what
           // makes a thread one session in the AIRS console rather than N unrelated scans.
           session_id: sessionId || '',
+          // The conversation's own fields, so the appliance can bring it into being on its first
+          // turn. Not the owner: that is resolved from the cookie on the other side, because a
+          // client that could name the owner could write into someone else's conversation.
+          //
+          // The message ids travel too. The browser has already put both halves on screen under
+          // these ids, and letting the appliance mint its own would give the same two messages two
+          // identities — one the reader is looking at, one the next load returns.
+          ...(meta || {}),
         }),
       });
     } catch (_) {
@@ -2188,6 +2278,19 @@
     c.messages.push(userMsg);
     c.updatedAt = now;
 
+    // What the appliance needs to file this turn. `seq` counts stored messages, not what is on
+    // screen: a wait bubble and a notice are this console's own furniture and are never written,
+    // so numbering by the rendered list would leave gaps the next load reads as missing turns.
+    const answerOid = randId('m_', 10);
+    const turnMeta = {
+      service: c.mode || 'chat',
+      title: c.title || '',
+      draft: c.draft || '',
+      question_oid: userMsg.id,
+      answer_oid: answerOid,
+      seq: c.messages.filter(m => m.kind === 'text' && (m.role === 'user' || m.role === 'assistant')).length - 1,
+    };
+
     // The wait is a sequence of steps the operator should see happen, not a hidden pause before
     // the answer. `stage` is what it is doing and `startedAt` is how long it has been doing it —
     // between them a turn that is slow and a turn that is stuck stop looking the same, which is
@@ -2221,7 +2324,7 @@
       const onDelta = (soFar) => {
         if (!liveMsg) {
           drop();
-          liveMsg = { id: randId('m_', 10), role: 'assistant', kind: 'text',
+          liveMsg = { id: answerOid, role: 'assistant', kind: 'text',
                       text: '', ts: Date.now(), typing: true };
           c.messages.push(liveMsg);
           renderThread();                      // creates the bubble the streamer writes into
@@ -2230,7 +2333,7 @@
         streamer.push(soFar);
       };
 
-      turn = await askServer(text, convoModel(c), history, c.id, onDelta, turnCtl);
+      turn = await askServer(text, convoModel(c), history, c.id, onDelta, turnCtl, turnMeta);
 
       // A turn that streamed but did not end with an answer — blocked on the response side, or an
       // upstream error after the first tokens — must not leave its fragment on screen. The branch
@@ -2330,8 +2433,10 @@
       // the streamed path uses, not a second one: whether the text arrived in pieces or all at
       // once is a fact about the transport, and the reader should not be able to tell. `text`
       // starts empty and the pacer fills it in.
+      // The id the appliance filed the answer under. Both paths — streamed and all-at-once —
+      // use it, so a reload shows the same message rather than a second copy of it.
       const botMsg = {
-        id: randId('m_', 10), role: 'assistant', kind: 'text',
+        id: answerOid, role: 'assistant', kind: 'text',
         text: '', ts: Date.now(),
         scan: scanOrNull,
         typing: true,
@@ -2757,12 +2862,14 @@
 
       if (editing) {
         const c = state.convos.find(x => x.id === editing);
-        if (c) c.title = name;
+        if (c) { c.title = name; threads.patch(c.id, { title: name, draft: c.draft || '' }); }
       } else {
         const model = document.getElementById('nsModel')?.value || state.model;
         const c = startNewChat(model);
         // A name is optional: an unnamed session still titles itself from the first thing typed
         // into it, which is what the rail did before this dialog existed.
+        // Not sent yet: a conversation with no turns has no row on the appliance. The first turn
+        // is what brings it into being, and it carries the title with it.
         if (name) c.title = name;
         state.model = model;
       }

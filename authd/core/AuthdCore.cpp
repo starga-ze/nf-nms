@@ -12,13 +12,6 @@ bool AuthdCore::onInit()
 {
     LOG_INFO("authd: starting up");
 
-    m_threadManager = std::make_unique<pz::util::ThreadManager>();
-    if (!m_threadManager)
-    {
-        LOG_ERROR("failed to initialize thread manager");
-        return false;
-    }
-
     m_ipcClient = std::make_unique<pz::ipc::IpcClient>(ipcConfig(), pz::ipc::IpcDaemon::Authd);
 
     if (!m_ipcClient->init())
@@ -83,13 +76,6 @@ void AuthdCore::onLoop()
 void AuthdCore::onShutdown()
 {
     LOG_INFO("shutting down");
-
-    if (m_threadManager)
-    {
-        m_threadManager->stopAll();
-    }
-
-    LOG_INFO("all threads stopped");
 
     pz::util::Logger::Shutdown();
 }

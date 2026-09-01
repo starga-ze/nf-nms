@@ -206,6 +206,27 @@ std::optional<std::string> MgmtdServiceManager::takeApiTestResult(std::uint32_t 
     return out;
 }
 
+void MgmtdServiceManager::setChatContext(std::uint32_t ticket, ChatContext ctx)
+{
+    // Bounded the same way the results are, and for the same reason: a browser that navigated away
+    // never comes back for its ticket, and a question nobody will ever see the answer to is worth
+    // nothing. Cleared wholesale rather than aged — the map is small and the alternative is a
+    // timestamp per entry to serve a case that costs one lost turn.
+    if (m_chatContexts.size() > 256)
+        m_chatContexts.clear();
+    m_chatContexts[ticket] = std::move(ctx);
+}
+
+std::optional<MgmtdServiceManager::ChatContext> MgmtdServiceManager::takeChatContext(std::uint32_t ticket)
+{
+    const auto it = m_chatContexts.find(ticket);
+    if (it == m_chatContexts.end())
+        return std::nullopt;
+    ChatContext out = std::move(it->second);
+    m_chatContexts.erase(it);
+    return out;
+}
+
 void MgmtdServiceManager::setChatResult(std::uint32_t ticket, std::string resultJson)
 {
     // A browser that navigated away never drains its ticket, so the map is bounded the same way

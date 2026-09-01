@@ -21,6 +21,7 @@ enum class EnginedEventDomain : std::uint32_t
     Probe = 6,
     ApiCredential = 7,
     Collection = 8,
+    Chat = 9,
 };
 
 class EnginedEvent : public pz::event::Event

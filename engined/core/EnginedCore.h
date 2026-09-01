@@ -3,7 +3,6 @@
 #include "core/Core.h"
 
 #include "ipc/IpcClient.h"
-#include "util/ThreadManager.h"
 
 #include "action/EnginedActionFactory.h"
 #include "event/EnginedEventFactory.h"
@@ -39,7 +38,6 @@ private:
     std::chrono::steady_clock::time_point m_lastPreflightAttempt{};
 
 
-    std::unique_ptr<pz::util::ThreadManager> m_threadManager;
     std::unique_ptr<pz::ipc::IpcClient> m_ipcClient;
 
     std::unique_ptr<EnginedEventFactory> m_eventFactory;

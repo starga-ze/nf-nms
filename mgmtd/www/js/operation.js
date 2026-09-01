@@ -213,8 +213,17 @@
     if (mode === 'load') {
       ov.querySelectorAll('[data-load]').forEach(btn => btn.addEventListener('click', async () => {
         const name = btn.getAttribute('data-load');
-        if (!window.confirm(`Load "${name}" and apply it? It is committed as a new running-config version `
-                            + 'and the daemons reload onto it.')) return;
+        // NMS.confirm renders into the same centre-screen modal this picker is already using, so
+        // asking here replaces the list. That is fine on the way forward — the list is closed
+        // either way — but a cancel has to put it back, or the operator is left staring at nothing
+        // after declining.
+        const ok = await window.NMS.confirm({
+          title: 'Load configuration',
+          message: `Load "${name}" and apply it?`,
+          detail: 'It is committed as a new running-config version and the daemons reload onto it.',
+          confirmLabel: 'Load and apply',
+        });
+        if (!ok) { openPicker(mode); return; }
         const doc = await getJson('/api/settings/saved-config-content?name=' + encodeURIComponent(name));
         modal().close();
         if (!doc) { setMsg('Could not read that saved configuration.', true); return; }

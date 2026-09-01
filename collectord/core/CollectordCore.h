@@ -3,7 +3,6 @@
 #include "core/Core.h"
 
 #include "ipc/IpcClient.h"
-#include "util/ThreadManager.h"
 
 #include "action/CollectordActionFactory.h"
 #include "event/CollectordEventFactory.h"
@@ -33,7 +32,6 @@ protected:
 
 private:
 
-    std::unique_ptr<pz::util::ThreadManager> m_threadManager;
     std::unique_ptr<pz::ipc::IpcClient> m_ipcClient;
 
     // Drives outbound device calls (pz::http::requestAsync). collectord serves no HTTP of its own,

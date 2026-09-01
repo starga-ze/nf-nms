@@ -34,6 +34,18 @@ namespace
 // every model they serve — which is also why the id is the vendor's name and not a model family's.
 constexpr const char* kAiProviders[] = {"openai", "google", "anthropic"};
 
+// The scan service's key, in the same sealed store under a reserved id.
+//
+// It is not a vendor that serves turns, and the console shows it on the Guardrail page rather than
+// beside the three above — but it is the same kind of thing: a key an operator pastes in, that
+// mgmtd seals, that engined writes, and that travels to pretzel-ai on the next push. A second table
+// would have duplicated all of that to record which page a row is rendered on.
+constexpr const char* kAirsCredentialId = "airs";
+// The AI gateway's subscription key. It serves the completion as well as governing inspection when
+// that guardrail is chosen, which is why it is configured on the Guardrail page and stored beside
+// the scan key rather than among the vendors.
+constexpr const char* kGatewayCredentialId = "portkey";
+
 bool knownProvider(const std::string& id)
 {
     for (const auto* known : kAiProviders)
@@ -42,6 +54,21 @@ bool knownProvider(const std::string& id)
             return true;
     }
     return false;
+}
+
+// Every id the credential endpoints accept, and which store it lives in.
+//
+// One endpoint pair, two tables. The vendors and the guardrail hold the same kind of secret and are
+// sealed, stored and pushed identically, so a second pair of handlers would have differed only in a
+// table name. They are separate tables because a vendor row is one of a set an operator adds to and
+// removes from, while the guardrail is a single fact about this appliance.
+const char* credentialScope(const std::string& id)
+{
+    if (knownProvider(id))
+        return "provider";
+    if (id == kAirsCredentialId || id == kGatewayCredentialId)
+        return "guardrail";
+    return nullptr;
 }
 
 }
@@ -57,19 +84,33 @@ void AiController::credentials(MgmtdServiceManager& sm, const pz::http::HttpRequ
     json out = json::object();
     for (const auto* id : kAiProviders)
         out[id] = {{"stored", false}};
+    // Seeded like the vendors, and for the same reason: the Guardrail page has to render "no key
+    // stored" as a state rather than as a missing answer.
+    out[kAirsCredentialId] = {{"stored", false}};
+    out[kGatewayCredentialId] = {{"stored", false}};
 
     try
     {
-        const auto rows = pz::db::Database::instance().queryRows(
+        auto rows = pz::db::Database::instance().queryRows(
             "SELECT id, (key_enc IS NOT NULL)::int, "
             "COALESCE(to_char(updated_at, 'YYYY-MM-DD\"T\"HH24:MI:SSOF'), ''), "
             "COALESCE(to_char(last_test_at, 'YYYY-MM-DD\"T\"HH24:MI:SSOF'), ''), "
             "COALESCE(last_test_ok::int::text, ''), COALESCE(last_test_note, '') "
             "FROM ai_provider_credential_state");
 
+        // Both stores in one answer. The two pages that read this each take the ids they render;
+        // splitting the response would have meant two round trips for a console that opens both.
+        for (auto& r : pz::db::Database::instance().queryRows(
+                 "SELECT id, (key_enc IS NOT NULL)::int, "
+                 "COALESCE(to_char(updated_at, 'YYYY-MM-DD\"T\"HH24:MI:SSOF'), ''), "
+                 "COALESCE(to_char(last_test_at, 'YYYY-MM-DD\"T\"HH24:MI:SSOF'), ''), "
+                 "COALESCE(last_test_ok::int::text, ''), COALESCE(last_test_note, '') "
+                 "FROM ai_guardrail_credential_state"))
+            rows.push_back(std::move(r));
+
         for (const auto& r : rows)
         {
-            if (r.size() < 6 || !knownProvider(r[0]))
+            if (r.size() < 6 || !credentialScope(r[0]))
                 continue;
             json e;
             e["stored"] = (r[1] == "1");
@@ -105,10 +146,13 @@ void AiController::credentialStore(MgmtdServiceManager& sm, const pz::http::Http
     }
 
     const std::string id = input.value("id", std::string());
-    if (!knownProvider(id))
-        return fill(resp, 400, R"({"error":"id must be one of openai, google, anthropic"})");
+    const char* scope = credentialScope(id);
+    if (!scope)
+        return fill(resp, 400, R"({"error":"id must be one of openai, google, anthropic, airs, portkey"})");
 
-    json payload = {{"id", id}};
+    // engined picks the table from this. Named rather than inferred there: a writer that guessed
+    // from the id would put a guardrail key in the vendor table the day a vendor is called "airs".
+    json payload = {{"id", id}, {"scope", scope}};
     // Kept for the push below, which cannot read it back out of the store in time. Empty means
     // the key was removed, which is what the push takes a clear to mean.
     std::string apiKey;

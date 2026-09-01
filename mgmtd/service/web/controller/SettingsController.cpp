@@ -412,6 +412,281 @@ bool validateAiProviders(const json& values, std::string& error)
     return true;
 }
 
+// pretzel-ai.guardrail — one entry per engine pretzel-ai runs, and how its turns are inspected.
+//   { list: [{ service, guardrail, checkpoints{...}, airs{...}, gateway{...}, shape{...} }] }
+//
+// Two engines, each configurable once. Chat calls a model and returns; Agent loops through tool
+// calls. They are separate entries because the question "what should be inspected here" has
+// different answers — Agent has two checkpoints Chat does not.
+//
+// No api_key anywhere in here: both subscriptions are sealed in ai_guardrail_credential_state and
+// a commit carrying one is refused by rejectSecrets, same as a vendor's.
+//
+// No endpoint either, and that is not an omission the operator can correct: each is a fact about
+// the service being called, compiled into pretzel-ai, which has to speak its dialect anyway.
+constexpr const char* kAiServices[] = {"chat", "agent"};
+constexpr const char* kGuardrailKinds[] = {"none", "api_application", "ai_gateway"};
+
+bool inList(const std::string& v, const char* const* list, std::size_t n)
+{
+    for (std::size_t i = 0; i < n; ++i)
+        if (v == list[i])
+            return true;
+    return false;
+}
+
+bool validateServiceEntry(const json& e, const std::string& at, std::string& error)
+{
+    if (!e.is_object())
+    {
+        error = at + " must be an object";
+        return false;
+    }
+    if (!rejectSecrets(e, at.c_str(), error))
+        return false;
+
+    const std::string service = e.value("service", std::string());
+    if (!inList(service, kAiServices, std::size(kAiServices)))
+    {
+        error = at + ".service must be one of chat, agent — got '" + service + "'";
+        return false;
+    }
+
+    // The one field with a fixed vocabulary that decides whether anything inspects at all. Checked
+    // here because a typo that fell through would reach pretzel-ai as an unbuildable configuration
+    // and refuse the whole push — which reports as "the assistant stopped working" rather than as
+    // "guardrail is misspelt".
+    const std::string guardrail = e.value("guardrail", std::string());
+    if (!inList(guardrail, kGuardrailKinds, std::size(kGuardrailKinds)))
+    {
+        error = at + ".guardrail must be one of none, api_application, ai_gateway — got '"
+              + guardrail + "'";
+        return false;
+    }
+
+    if (const auto cp = e.find("checkpoints"); cp != e.end())
+    {
+        if (!cp->is_object())
+        {
+            error = at + ".checkpoints must be an object";
+            return false;
+        }
+        for (const auto* f : {"prompt", "response", "tool_call", "tool_result"})
+        {
+            if (const auto it = cp->find(f); it != cp->end() && !it->is_boolean())
+            {
+                error = at + ".checkpoints." + f + " must be a boolean";
+                return false;
+            }
+        }
+    }
+
+    // The two blocks carry only what their guardrail needs. Neither is required — an entry that
+    // has not been given a profile yet is a configuration in progress, and refusing to store it
+    // would mean an operator cannot save half the form.
+    for (const auto& [key, secretName] : {std::pair{"airs", "airs"}, std::pair{"gateway", "gateway"}})
+    {
+        const auto blk = e.find(key);
+        if (blk == e.end())
+            continue;
+        if (!blk->is_object())
+        {
+            error = at + "." + key + " must be an object";
+            return false;
+        }
+        std::string secretError;
+        if (!rejectSecrets(*blk, (at + "." + secretName).c_str(), secretError))
+        {
+            error = secretError;
+            return false;
+        }
+        if (const auto t = blk->find("timeout_sec");
+            t != blk->end() && (!t->is_number() || t->get<double>() <= 0))
+        {
+            error = at + "." + key + ".timeout_sec must be a positive number";
+            return false;
+        }
+    }
+
+    if (const auto sh = e.find("shape"); sh != e.end())
+    {
+        if (!sh->is_object())
+        {
+            error = at + ".shape must be an object";
+            return false;
+        }
+        if (const auto sp = sh->find("system_prompt"); sp != sh->end() && !sp->is_string())
+        {
+            error = at + ".shape.system_prompt must be a string";
+            return false;
+        }
+        // Nothing is checked beyond the type. What a reasonable token cap is depends on the model,
+        // and an appliance that refused 200000 because it looked large would be wrong the week a
+        // model shipped with a larger window.
+        if (const auto mt = sh->find("max_tokens");
+            mt != sh->end() && (!mt->is_number() || mt->get<double>() < 0))
+        {
+            error = at + ".shape.max_tokens must be a non-negative number";
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool validateAiServices(const json& values, std::string& error)
+{
+    if (!rejectSecrets(values, "guardrail", error))
+        return false;
+    if (!values.contains("list"))
+        return true;
+    if (!values["list"].is_array())
+    {
+        error = "guardrail.list must be an array";
+        return false;
+    }
+
+    std::set<std::string> seen;
+    std::size_t idx = 0;
+    for (const auto& e : values["list"])
+    {
+        const std::string at = "guardrail.list[" + std::to_string(idx++) + "]";
+        if (!validateServiceEntry(e, at, error))
+            return false;
+        // One entry per engine. A second would leave which of the two is deployed to whichever the
+        // assembler happened to reach first.
+        if (!seen.insert(e.value("service", std::string())).second)
+        {
+            error = at + " repeats service '" + e.value("service", std::string()) + "'";
+            return false;
+        }
+    }
+    return true;
+}
+
+// pretzel.user — the local accounts, declared. Passwords are NOT here.
+//   { list: [{ oid, username, role, description? }] }
+//
+// Two roles, and the difference is account management: an admin may add, remove and set passwords
+// for other accounts, and a user may not. Everything else on this appliance is open to both — the
+// role says what it says and no more, which is why it is not called "viewer".
+//
+// At least one admin must remain, for the same reason at least one account must: an appliance whose
+// accounts nobody can manage is one that cannot be recovered from the console.
+//
+// Same split as connector.api_credentials: this document says which accounts exist, and
+// local_users holds what proves one. A commit carrying a password is refused by rejectSecrets
+// below, which is what keeps a hash out of a document that is append-versioned, rendered verbatim
+// in the review diff and written out by Save-to-file.
+//
+// The username is the login handle and has to be unique. It is also immutable once published —
+// enforced in the console rather than here, because this endpoint sees one commit and not the
+// history that would make a rename visible.
+bool validUserEntry(const json& u, const std::string& at, std::string& error)
+{
+    if (!u.is_object())
+    {
+        error = at + " must be an object";
+        return false;
+    }
+    if (!rejectSecrets(u, at.c_str(), error))
+        return false;
+    if (u.value("oid", std::string()).empty())
+    {
+        error = at + " has no oid";
+        return false;
+    }
+
+    const std::string role = u.value("role", std::string());
+    if (role != "admin" && role != "user")
+    {
+        error = at + ".role must be admin or user — got '" + role + "'";
+        return false;
+    }
+
+    const std::string name = u.value("username", std::string());
+    if (name.empty())
+    {
+        error = at + " has no username";
+        return false;
+    }
+    // What a login form and a database key can both carry without surprises. Refused rather than
+    // trimmed: an account whose name is not what the operator typed is one they cannot sign in as.
+    if (name.size() > 64)
+    {
+        error = at + ".username is longer than 64 characters";
+        return false;
+    }
+    for (const unsigned char c : name)
+    {
+        const bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+                     || c == '.' || c == '-' || c == '_';
+        if (!ok)
+        {
+            error = at + ".username may use letters, digits, dot, dash and underscore only";
+            return false;
+        }
+    }
+    return true;
+}
+
+bool validateUsers(const json& values, std::string& error)
+{
+    if (!rejectSecrets(values, "user", error))
+        return false;
+    if (!values.contains("list"))
+        return true;
+    if (!values["list"].is_array())
+    {
+        error = "user.list must be an array";
+        return false;
+    }
+    if (values["list"].empty())
+    {
+        // The appliance would have no way in. Refused at the commit rather than left to the
+        // console's disabled button: the button is a courtesy and this is the rule.
+        error = "at least one local account must remain — the appliance would have no way in";
+        return false;
+    }
+
+    const bool anyAdmin = std::any_of(values["list"].begin(), values["list"].end(),
+                                      [](const json& u)
+                                      {
+                                          return u.is_object()
+                                              && u.value("role", std::string()) == "admin";
+                                      });
+    if (!anyAdmin)
+    {
+        error = "at least one account must be an admin — nobody could manage accounts otherwise";
+        return false;
+    }
+
+    std::set<std::string> names, oids;
+    std::size_t idx = 0;
+    for (const auto& u : values["list"])
+    {
+        const std::string at = "user.list[" + std::to_string(idx++) + "]";
+        if (!validUserEntry(u, at, error))
+            return false;
+        if (!oids.insert(u.value("oid", std::string())).second)
+        {
+            error = at + " repeats an oid";
+            return false;
+        }
+        // Case-insensitively: two accounts an operator cannot tell apart are two accounts one of
+        // them will sign in to by mistake.
+        std::string lower = u.value("username", std::string());
+        for (auto& c : lower)
+            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        if (!names.insert(lower).second)
+        {
+            error = at + " repeats the username '" + u.value("username", std::string()) + "'";
+            return false;
+        }
+    }
+    return true;
+}
+
 // Shape only: every entry in every array this domain owns is well-formed on its own. Deliberately
 // says nothing about references — those cannot be judged one change at a time, see below.
 bool validateCommitShape(const std::string& scopeName, const std::string& domain, const json& values,
@@ -451,6 +726,12 @@ bool validateCommitShape(const std::string& scopeName, const std::string& domain
 
     if (scopeName == pz::config::scope::kPretzelAi && domain == "providers")
         return validateAiProviders(values, error);
+
+    if (scopeName == pz::config::scope::kPretzelAi && domain == "guardrail")
+        return validateAiServices(values, error);
+
+    if (scopeName == pz::config::scope::kPretzel && domain == "user")
+        return validateUsers(values, error);
 
     return true;
 }
@@ -573,6 +854,29 @@ void SettingsController::commit(MgmtdServiceManager& sm, const pz::http::HttpReq
     catch (const std::exception&)
     {
         return badRequest("invalid JSON body");
+    }
+
+    // Accounts are the one domain a commit may not carry unless the person publishing it may
+    // manage accounts. Everything else on this appliance is open to both roles; this is not,
+    // because a user who could publish `pretzel.user` could make themselves an admin.
+    //
+    // Refused for the whole batch rather than by dropping the entry: a partial publish is exactly
+    // what the batch rule below exists to prevent, and an operator who staged an account change
+    // they may not make should be told, not quietly given the rest.
+    if (input.contains("changes") && input["changes"].is_array()
+        && !sm.authService().sessionIsAdmin(sessionCookie(req)))
+    {
+        for (const auto& c : input["changes"])
+        {
+            if (c.is_object() && c.value("scope", std::string()) == pz::config::scope::kPretzel
+                && c.value("domain", std::string()) == "user")
+            {
+                LOG_WARN("settings-commit rejected: accounts may only be published by an admin "
+                         "(user={})", sm.authService().sessionUser(sessionCookie(req)));
+                return fill(resp, 403,
+                            R"({"error":"only an admin may change accounts","code":"FORBIDDEN"})");
+            }
+        }
     }
 
     if (!input.contains("changes") || !input["changes"].is_array())

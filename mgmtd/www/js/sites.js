@@ -210,12 +210,21 @@
     document.getElementById('stPanel').classList.remove('open');
   };
 
-  function removeSite(idx) {
+  async function removeSite(idx) {
     const s = state.sites[idx];
     const devices = (window.NMS.devices && window.NMS.devices.list()) || [];
     const used = devices.filter(d => d.site === s.oid).length;
-    if (used && !confirm(`${used} device${used > 1 ? 's' : ''} still belong to this site. Delete anyway?`))
-      return false;
+    if (used)
+    {
+      const ok = await window.NMS.confirm({
+        title: 'Remove site',
+        message: `${used} device${used > 1 ? 's' : ''} still belong to this site.`,
+        detail: 'They will show as missing until you move them to another site.',
+        confirmLabel: 'Remove anyway',
+      });
+      if (!ok)
+        return false;
+    }
     state.sites.splice(idx, 1);
     stage();
     return true;
@@ -227,13 +236,15 @@
     document.getElementById('stOverlay').onclick = closeEditor;
 
     const del = document.getElementById('stDelete');
-    if (del) del.onclick = () => {
-      if (removeSite(editIdx)) { closeEditor(); render(); }
+    if (del) del.onclick = async () => {
+      if (await removeSite(editIdx)) { closeEditor(); render(); }
     };
 
     document.getElementById('stSave').onclick = () => {
-      const s = collect(document.getElementById('stBody'));
-      if (!s.name) { alert('Site name is required.'); return; }
+      const body = document.getElementById('stBody');
+      window.NMS.utils.clearEditorError(body);
+      const s = collect(body);
+      if (!s.name) return window.NMS.utils.editorError(body, 'Site name is required.', 'name');
       if (editIdx == null) state.sites.push(s); else state.sites[editIdx] = s;
       stage();
       closeEditor(); render();
@@ -244,8 +255,8 @@
   function wireRows(scope) {
     scope.querySelectorAll('[data-edit]').forEach(b =>
       b.addEventListener('click', () => openEditor(+b.dataset.edit)));
-    scope.querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', () => {
-      if (removeSite(+b.dataset.del)) render();
+    scope.querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', async () => {
+      if (await removeSite(+b.dataset.del)) render();
     }));
   }
 

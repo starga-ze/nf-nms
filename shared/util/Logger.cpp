@@ -1,5 +1,6 @@
 #include "util/Logger.h"
-#include "util/ThreadManager.h"
+
+#include <sys/prctl.h>
 
 #include <filesystem>
 #include <spdlog/async.h>
@@ -133,7 +134,10 @@ void Logger::Shutdown()
 
 void Logger::setThreadName()
 {
-    ThreadManager::setName("spdlog");
+    // So `top -H` and a core file name spdlog's writer rather than showing another copy of the
+    // daemon's name. The kernel truncates at 16 bytes including the terminator, which "spdlog"
+    // is comfortably inside; a longer name would be silently cut rather than rejected.
+    prctl(PR_SET_NAME, "spdlog", 0, 0, 0);
 }
 
 }

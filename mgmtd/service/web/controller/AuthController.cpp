@@ -31,13 +31,19 @@ namespace
 void persistCredential(MgmtdServiceManager& sm, const std::string& username,
                        const AuthService::Credential& cred)
 {
-    const json payload = {{"username", username}, {"password_hash", cred.passwordHash}, {"salt", cred.salt}};
+    // `must_change` false: this is someone setting their own password, which is the act that
+    // clears a forced change rather than one that imposes it. An operator setting a password FOR
+    // someone else goes through UserController, which sets it true.
+    const json payload = {{"username", username},
+                          {"password_hash", cred.passwordHash},
+                          {"salt", cred.salt},
+                          {"must_change", false}};
     const std::string payloadStr = payload.dump();
 
     auto msg = std::make_unique<pz::ipc::IpcMessage>();
     msg->setSrc(pz::ipc::IpcDaemon::Mgmtd);
     msg->setDst(pz::ipc::IpcDaemon::Engined);
-    msg->setCmd(pz::ipc::IpcCmd::AdminPasswordUpdate);
+    msg->setCmd(pz::ipc::IpcCmd::LocalUserUpdate);
     msg->setFlags(pz::ipc::IpcProtocol::toFlag(pz::ipc::IpcFlag::Request));
     msg->setPayload(std::vector<std::uint8_t>(payloadStr.begin(), payloadStr.end()));
 
@@ -72,8 +78,9 @@ void AuthController::login(MgmtdServiceManager& sm, const pz::http::HttpRequest&
             }
             else
             {
+                // Nothing to update in memory: the credential is read from the table when it is
+                // needed, so engined's write is the whole of it.
                 persistCredential(sm, username, cred);
-                sm.authService().applyCredential(cred.passwordHash, cred.salt);
                 LOG_INFO("credential upgraded to the current hash format (user={})", username);
             }
         }
@@ -108,7 +115,12 @@ void AuthController::changePassword(MgmtdServiceManager& sm, const pz::http::Htt
         if (newPass.empty())
             return fill(resp, 400, R"({"error":"new password must not be empty"})");
 
-        const std::string& user = sm.authService().username();
+        // The session's account, not "the" account. This used to read a cached username, which
+        // was always the seeded admin — so a second person changing their password checked the
+        // admin's current one and then overwrote the admin's.
+        const std::string user = sm.authService().sessionUser(sessionCookie(req));
+        if (user.empty())
+            return fill(resp, 401, R"({"error":"unauthorized"})");
         if (!sm.authService().checkPassword(user, oldPass))
             return fill(resp, 401, R"({"error":"current password is incorrect"})");
 
@@ -122,9 +134,8 @@ void AuthController::changePassword(MgmtdServiceManager& sm, const pz::http::Htt
         }
 
         persistCredential(sm, user, cred);
-        sm.authService().applyCredential(cred.passwordHash, cred.salt);
 
-        LOG_INFO("admin password change sent to engined (user={})", user);
+        LOG_INFO("password change sent to engined (user={})", user);
         fill(resp, 200, R"({"status":"ok"})");
     }
     catch (const std::exception& e)
@@ -136,11 +147,9 @@ void AuthController::changePassword(MgmtdServiceManager& sm, const pz::http::Htt
 
 void AuthController::whoami(MgmtdServiceManager& sm, const pz::http::HttpRequest& req, pz::http::HttpResponse& resp)
 {
-    std::string user = sm.authService().sessionUser(sessionCookie(req));
-    if (user.empty())
-        user = sm.authService().username();
-
-    const json out = {{"username", user}};
+    const std::string user = sm.authService().sessionUser(sessionCookie(req));
+    const json out = {{"username", user},
+                      {"role", sm.authService().sessionRole(sessionCookie(req))}};
     fill(resp, 200, out.dump());
 }
 

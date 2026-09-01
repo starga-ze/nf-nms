@@ -66,7 +66,17 @@ enum class IpcCmd : std::uint16_t
     SettingsCommitResponse = 109,
     // Was CommitQueueStatus. engined → mgmtd, commit-queue progress for the settings-commit flow.
     SettingsCommitStatus = 111,
-    AdminPasswordUpdate = 114,
+    // Was AdminPasswordUpdate, when the only local account was the appliance's admin and the only
+    // thing that ever changed about it was its password. Accounts are created and removed from the
+    // console now, so this writes the row rather than one column of it: an upsert keyed on the
+    // account's oid, or a removal when `remove` is set.
+    LocalUserUpdate = 114,
+
+    // ── Assistant (mgmtd → engined; the conversations the console shows) ──
+    // One message per completed turn, carrying the session's own fields and both halves of the
+    // turn. Not two writes: a turn is one thing, and a pair that could half-land would leave a
+    // question on screen with no answer under it. `delete` removes one conversation.
+    ChatTurnStore = 141,
 
     // ── Probe (ICMP reachability; probed, a privileged raw-socket daemon) ──
     ProbeRequest = 115,   // → probed: run a reachability sweep

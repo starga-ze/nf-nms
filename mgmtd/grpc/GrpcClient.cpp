@@ -21,11 +21,40 @@ struct GrpcClient::Impl
     std::shared_ptr<grpc::Channel> channel;
     std::unique_ptr<v1::PretzelAi::Stub> stub;
 
-    // The in-flight refresh's context, so another thread can cancel it. Guarded because the
+    // The in-flight stream's context, so another thread can cancel it. Guarded because the
     // cancelling thread and the streaming thread are different by definition.
+    //
+    // These point at a ClientContext on the streaming thread's STACK, which is why clearing them
+    // is not optional and not something to do on the way past the last line: an exception between
+    // the two would leave a pointer into a dead frame, and the next cancel would TryCancel through
+    // it. Use the guard below rather than a pair of assignments — one of these two call sites was
+    // written each way, and the one written by hand was the one that could dangle.
     std::mutex refreshMutex;
     grpc::ClientContext* activeRefresh = nullptr;
     grpc::ClientContext* activeRun = nullptr;
+
+    // Publishes `ctx` for the cancelling thread, and withdraws it however the caller leaves.
+    class ActiveStream
+    {
+    public:
+        ActiveStream(Impl& impl, grpc::ClientContext*& slot, grpc::ClientContext& ctx)
+            : m_impl(impl), m_slot(slot)
+        {
+            std::lock_guard<std::mutex> lock(m_impl.refreshMutex);
+            m_slot = &ctx;
+        }
+        ~ActiveStream()
+        {
+            std::lock_guard<std::mutex> lock(m_impl.refreshMutex);
+            m_slot = nullptr;
+        }
+        ActiveStream(const ActiveStream&) = delete;
+        ActiveStream& operator=(const ActiveStream&) = delete;
+
+    private:
+        Impl& m_impl;
+        grpc::ClientContext*& m_slot;
+    };
 };
 
 GrpcClient::GrpcClient(const std::string& target)
@@ -389,10 +418,7 @@ void GrpcClient::benchtestRun(std::int64_t datasetId, const std::string& categor
     request.set_note(note);
 
     grpc::ClientContext ctx;
-    {
-        std::lock_guard<std::mutex> lock(m_impl->refreshMutex);
-        m_impl->activeRun = &ctx;
-    }
+    Impl::ActiveStream active(*m_impl, m_impl->activeRun, ctx);
 
     std::unique_ptr<grpc::ClientReader<v1::RunProgress>> reader(
         m_impl->stub->RunBenchtest(&ctx, request));
@@ -401,10 +427,6 @@ void GrpcClient::benchtestRun(std::int64_t datasetId, const std::string& categor
         on_progress(toJson(progress));
 
     const grpc::Status status = reader->Finish();
-    {
-        std::lock_guard<std::mutex> lock(m_impl->refreshMutex);
-        m_impl->activeRun = nullptr;
-    }
     if (!status.ok() && status.error_code() != grpc::StatusCode::CANCELLED)
         error = "gRPC transport error: " + status.error_message();
 }
@@ -520,20 +542,7 @@ void GrpcClient::refreshCorpus(const std::string& scope,
     request.set_scope(scope);
 
     grpc::ClientContext ctx;
-    {
-        std::lock_guard<std::mutex> lock(m_impl->refreshMutex);
-        m_impl->activeRefresh = &ctx;
-    }
-    // Cleared before ctx goes out of scope, whatever path leaves this function.
-    struct Clear
-    {
-        Impl* impl;
-        ~Clear()
-        {
-            std::lock_guard<std::mutex> lock(impl->refreshMutex);
-            impl->activeRefresh = nullptr;
-        }
-    } clear{m_impl.get()};
+    Impl::ActiveStream active(*m_impl, m_impl->activeRefresh, ctx);
 
     std::unique_ptr<grpc::ClientReader<v1::RefreshProgress>> reader(
         m_impl->stub->RefreshCorpus(&ctx, request));

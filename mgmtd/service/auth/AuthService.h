@@ -39,6 +39,8 @@ public:
         std::string salt;
     };
 
+    // Whether any account exists to sign in as. Retried at boot until the database answers —
+    // it does not cache a credential, because there is no longer one account to cache.
     bool loadCredential();
 
     LoginResult login(const std::string& username, const std::string& password);
@@ -49,22 +51,34 @@ public:
 
     Credential makeCredential(const std::string& newPassword) const;
 
-    void applyCredential(const std::string& passwordHash, const std::string& salt);
+    // The role the account signed in on this session holds, or "" for a session that is not
+    // live. Read from running_config, where the account is declared — not from local_users, which
+    // holds only what proves an account rather than what it may do. That split is what puts a
+    // change of role in the review diff.
+    std::string sessionRole(const std::string& sessionId) const;
 
-    const std::string& username() const
+    bool sessionIsAdmin(const std::string& sessionId) const
     {
-        return m_username;
+        return sessionRole(sessionId) == kRoleAdmin;
     }
 
-    bool mustChangePassword() const
-    {
-        return m_mustChange;
-    }
+    // Whether the person on this session still has to replace their password. Per session, not per
+    // appliance: it used to be a single flag about the seeded admin, which meant one account's
+    // pending change locked every other account out of every route.
+    bool mustChangePassword(const std::string& sessionId) const;
+
+    // Whether the appliance's own first-run setup is still pending — any admin account that has
+    // not replaced its seeded password. Distinct from the per-session question above: this is what
+    // decides whether federated sign-in may be offered at all.
+    bool adminSetupPending() const;
 
     bool credentialLoaded() const
     {
         return m_loaded;
     }
+
+    static constexpr const char* kRoleAdmin = "admin";
+    static constexpr const char* kRoleUser = "user";
 
     std::uint64_t sessionTtlSec() const
     {
@@ -92,7 +106,26 @@ private:
     {
         std::uint64_t expiresAt{0};
         std::string username;
+        // Snapshotted at sign-in. A session does not re-read the account on every request: the
+        // role is a declaration that changes at a commit, and a person whose role is taken away
+        // mid-session keeps it until they sign in again — which is the same bargain the session
+        // TTL already makes about an account being removed.
+        std::string role;
+        bool mustChange{false};
     };
+
+    // One account's stored credential, read at the moment it is needed.
+    struct Stored
+    {
+        std::string username;
+        std::string passwordHash;
+        std::string salt;
+        bool mustChange{false};
+        bool found{false};
+    };
+
+    static Stored readAccount(const std::string& username);
+    static std::string declaredRole(const std::string& username);
 
     static std::uint64_t now();
     static std::string generateSessionId();
@@ -110,17 +143,17 @@ private:
 
     static constexpr int kFreeAttempts = 5;
     static constexpr std::uint64_t kMaxBackoffSec = 30;
+    // Per username, so one account being guessed at does not lock the others out — and bounded,
+    // so an attacker cycling usernames cannot grow this map instead.
+    static constexpr std::size_t kMaxThrottled = 64;
 
-    void noteLoginFailure();
+    bool throttled(const std::string& username);
+    void noteLoginFailure(const std::string& username);
 
 private:
     std::unordered_map<std::string, Session> m_sessions;
-    Throttle m_throttle;
+    std::unordered_map<std::string, Throttle> m_throttles;
 
-    std::string m_username{"admin"};
-    std::string m_passwordHash;
-    std::string m_salt;
-    bool m_mustChange{false};
     bool m_loaded{false};
     // Idle timeout: 30 minutes with no operator input. Set at login and pushed forward by
     // renewSession(); nothing else moves it.

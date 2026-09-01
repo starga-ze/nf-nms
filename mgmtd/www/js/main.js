@@ -40,7 +40,7 @@
   //          died while the tab sat idle, so the operator meets the login page rather than a
   //          screen full of stale data.
   //
-  // Nothing else may renew: the Home dashboard, the Infrastructure and API Collection live views
+  // Nothing else may renew: the Home dashboard, the Topology and API Collection live views
   // and the log tail all poll on timers, and if polling extended the session then leaving any of
   // those open would keep it alive for ever. That is also why returning to the tab only probes —
   // alt-tabbing back is not work, and must not buy another 30 minutes.
@@ -83,33 +83,59 @@
 
   // ── Configuration groups ─────────────────────────────────────────────────
   // One definition drives both navigation levels: the sidebar flyout lists the groups, and the
-  // topbar shows the tabs of whichever group is open. Grouped by what the operator is working
-  // on rather than by data type —
-  //   AI Provider        which vendors serve a turn, and how it is shaped (the pretzel-ai deployment)
-  //   Site Management    where things are, and what is there (a Site is one customer)
-  //   API Profile        the reusable definitions a connector references
-  //   API Connector      binding a device + credential + endpoints on a schedule
-  //   System Management  this appliance, not the managed estate
-  // A group with a single tab renders no tab row; its name in the sidebar is the whole story.
+  // topbar shows the tabs of whichever group is open. A group with a single tab renders no tab
+  // row; its name in the flyout is the whole story.
   //
-  // AI Provider sits first because it is the only group that configures this appliance's own
-  // outbound behaviour: every other group describes the estate being managed, this one decides
-  // who the appliance itself talks to on the operator's behalf.
+  // `section` is what the group configures, and it is what the flyout puts its headings on. Without
+  // it the flyout was one flat list of seven, and "AI Provider" sat next to "API Profile" with
+  // nothing to say that one decides what the appliance itself says to a vendor while the other
+  // describes the estate it manages — two words a letter apart doing entirely different jobs.
+  //
+  //   AI Service     AI Provider       which vendors serve a turn (the pretzel-ai deployment)
+  //                  AI Guardrail      who inspects a turn, and at which of its four points
+  //   Infra Service  Site Management   where things are, and what is there (a Site is one customer)
+  //                  API Profile       the reusable definitions a connector references
+  //                  API Connector     binding a device + credential + endpoints on a schedule
+  //   System         User Management   who may sign in
+  //
+  // System Operation is NOT here. Saving and loading a configuration file, and the appliance's own
+  // upkeep, are things you DO — they take effect when pressed, they stage nothing, and there is no
+  // Publish for them. Everything else in this flyout is a declaration you edit and then publish,
+  // and putting an action among them made Publish look like it applied to both.
+  //
+  // AI comes first because it is the half that configures this appliance's own outbound behaviour:
+  // the infra groups describe the estate being managed, these two decide who the appliance itself
+  // talks to on the operator's behalf, and who looks at what it says. System comes last because it
+  // is the one an operator visits least.
   const SETTINGS_GROUPS = [
-    { id: 'ai-provider', label: 'AI Provider', tabs: [
+    { id: 'ai-provider', label: 'AI Provider', section: 'ai', tabs: [
         { id: 'ai-provider', label: 'AI Provider' } ] },
-    { id: 'site-management', label: 'Site Management', tabs: [
+    { id: 'ai-guardrail', label: 'AI Guardrail', section: 'ai', tabs: [
+        { id: 'ai-guardrail', label: 'AI Guardrail' } ] },
+    { id: 'site-management', label: 'Site Management', section: 'infra', tabs: [
         { id: 'sites',        label: 'Sites'        },
         { id: 'devices',      label: 'Devices'      } ] },
-    { id: 'api-profile', label: 'API Profile', tabs: [
+    { id: 'api-profile', label: 'API Profile', section: 'infra', tabs: [
         { id: 'api-key',      label: 'API Credential' },
         { id: 'api-endpoint', label: 'API Endpoint' } ] },
-    { id: 'api-connector', label: 'API Connector', tabs: [
+    { id: 'api-connector', label: 'API Connector', section: 'infra', tabs: [
         { id: 'api-connector', label: 'API Connector' } ] },
-    { id: 'system-management', label: 'System Management', tabs: [
-        { id: 'user',         label: 'User'         },
-        { id: 'operation',    label: 'Operation'    } ] },
+    // One group each rather than two tabs under a "System Management" heading. They are not two
+    // views of one subject the way Sites and Devices are: one is who may sign in, the other is what
+    // the appliance does with its own disks and clock, and an operator going to either was reading
+    // a tab row to find out they had landed on the wrong one. The tab ids are unchanged — users.js
+    // and operation.js still key off `user` and `operation` — so only the way in moved.
+    { id: 'user-management', label: 'User Management', section: 'system', tabs: [
+        { id: 'user',         label: 'User Management'  } ] },
+    { id: 'system-operation', label: 'System Operation', tabs: [
+        { id: 'operation',    label: 'System Operation' } ] },
   ];
+
+  // The label each section carries in the Configuration flyout. The first two are named for the
+  // sidebar sections they mirror, so the flyout reads as a continuation of the column it opened
+  // from; System has no counterpart up there because it is the appliance itself rather than
+  // anything it manages or talks to.
+  const SETTINGS_SECTIONS = { ai: 'AI Service', infra: 'Infra Service', system: 'System' };
 
   const SETTINGS_TABS = SETTINGS_GROUPS.reduce((acc, g) => acc.concat(g.tabs), []);
   // Where a bare /settings (no ?tab=) lands. Published because the tab modules resolve the same
@@ -131,29 +157,31 @@
              <polyline points="9 22 9 12 15 12 15 22"/>`,
     },
 
-    { type: 'section', label: 'AI' },
+    { type: 'section', label: 'AI Service' },
     {
       // The internal assistant itself, not a view of it: the one page here that an ordinary
-      // employee would use rather than an operator. It sits above Insight because the security
-      // story on the pages below it starts with the traffic this page generates.
+      // employee would use rather than an operator. It sits above Infra Service because the
+      // security story on the pages below it starts with the traffic this page generates.
       type: 'link', id: 'assistant', label: 'Assistant', href: 'chatbot',
       icon: `<path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/>
              <path d="M18.5 15.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z"/>`,
     },
     {
       // The prompt sets the Assistant's guardrail is measured against. It sits beside the Assistant
-      // rather than under Insight because it is the same subject read from the other end: one page
-      // is the traffic, the other is the set the traffic is scored on.
+      // rather than under Infra Service because it is the same subject read from the other end: one
+      // page is the traffic, the other is the set the traffic is scored on.
       type: 'link', id: 'benchtest', label: 'Benchtest', href: 'benchtest',
       icon: `<path d="M4 20h16"/><rect x="5" y="11" width="3.6" height="6" rx="1"/>
              <rect x="10.2" y="7" width="3.6" height="10" rx="1"/>
              <rect x="15.4" y="13" width="3.6" height="4" rx="1"/>`,
     },
 
-    { type: 'section', label: 'Insight' },
+    { type: 'section', label: 'Infra Service' },
     {
-      // The estate as a picture rather than a list: who connects, what they land on, where it exits.
-      type: 'link', id: 'site-topology', label: 'Infrastructure', href: 'topology',
+      // The estate as a picture rather than a list: who connects, what they land on, where it
+      // exits. Named for what it draws, not for where it sits — the section above already says
+      // that, and "Overview" would have been the only page here that did not say what it shows.
+      type: 'link', id: 'site-topology', label: 'Topology', href: 'topology',
       icon: `<circle cx="5" cy="12" r="2.4"/><circle cx="12" cy="5.5" r="2.4"/>
              <circle cx="12" cy="18.5" r="2.4"/><circle cx="19" cy="12" r="2.4"/>
              <path d="M7 11l3-4M7 13l3 4M14 7l3 3.4M14 17l3-3.4"/>`,
@@ -185,6 +213,7 @@
       subitems: SETTINGS_GROUPS.map(g => ({
         id: g.id,
         label: g.label,
+        section: SETTINGS_SECTIONS[g.section] || '',
         href: `settings?tab=${g.tabs[0].id}`,
         tabs: g.tabs.map(t => t.id),
       })),
@@ -198,6 +227,15 @@
                       a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83
                       l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09
                       a1.65 1.65 0 0 0-1.51 1z"/>`,
+    },
+    {
+      // Beside Configuration rather than inside it. Same page, same tab machinery — only the way
+      // in changed, because this is where an operator goes to act on the appliance rather than to
+      // describe it.
+      type: 'link', id: 'system-operation', label: 'System Operation', href: 'settings?tab=operation',
+      icon: `<path d="M12 3v4"/><path d="M12 17v4"/><path d="M5.6 5.6l2.9 2.9"/>
+             <path d="M15.5 15.5l2.9 2.9"/><path d="M3 12h4"/><path d="M17 12h4"/>
+             <circle cx="12" cy="12" r="3.2"/>`,
     },
     { type: 'section', label: 'Monitor' },
     {
@@ -235,7 +273,7 @@
     // The group is chosen in the sidebar flyout (SETTINGS_GROUPS); the topbar shows that
     // group's name and one row of its tabs.
     'settings':        { title: 'Configuration', groups: SETTINGS_GROUPS },
-    'topology':        { title: 'Infrastructure' },
+    'topology':        { title: 'Topology' },
     'collection':      { title: 'API Collection' },
     'log-viewer':      { title: 'System Log' },
     'laboratory':      { title: 'Laboratory' },
@@ -246,13 +284,22 @@
 
   // The flyout is rebuilt from the toggle's data-subitems each time it opens, so marking the
   // active group there is enough to keep it correct after an in-place tab switch.
+  // Every group, not just Configuration by name. There is one flyout onto the settings page today,
+  // but a selector that named it was a selector that would go quietly wrong the next time there
+  // were two — which there briefly was.
   function syncFlyoutActive(tabId) {
-    const toggle = document.querySelector('.nav-group[data-group-id="configuration"] .nav-group-toggle');
-    if (!toggle) return;
-    let subs;
-    try { subs = JSON.parse(toggle.dataset.subitems || '[]'); } catch (_) { return; }
-    subs.forEach(s => { s.active = !!(s.tabs && s.tabs.indexOf(tabId) !== -1); });
-    toggle.dataset.subitems = JSON.stringify(subs);
+    document.querySelectorAll('.nav-group .nav-group-toggle').forEach(toggle => {
+      let subs;
+      try { subs = JSON.parse(toggle.dataset.subitems || '[]'); } catch (_) { return; }
+      let any = false;
+      subs.forEach(s => {
+        s.active = !!(s.tabs && s.tabs.indexOf(tabId) !== -1);
+        any = any || s.active;
+      });
+      toggle.dataset.subitems = JSON.stringify(subs);
+      // The toggle carries the highlight while the flyout is shut, which is almost always.
+      toggle.classList.toggle('active', any);
+    });
   }
 
   function buildTopbar() {
@@ -485,6 +532,7 @@
         // the tabs it owns, membership decides instead.
         const subs = item.subitems.map(s => ({
           id: s.id, label: s.label, href: s.href, tabs: s.tabs || null,
+          section: s.section || '',
           soon: !!s.soon,
           active: s.tabs
             ? (parseHref(s.href).page === activePage && s.tabs.indexOf(activeTab) !== -1)
@@ -688,13 +736,23 @@
       let subs = [];
       try { subs = JSON.parse(toggle.dataset.subitems || '[]'); } catch (_) { /* ignore */ }
 
+      // A heading is emitted whenever the section changes, so a flyout whose items carry none
+      // renders exactly as it did before. Configuration is the only one that uses them today, and
+      // it needs them: "AI Provider" and "API Profile" are two words a letter apart doing
+      // different jobs, and a flat list of six gave the reader nothing to tell them apart by.
+      let section = null;
       flyout.innerHTML =
         `<div class="nav-flyout-title">${toggle.dataset.label || ''}</div>` +
         subs.map(s => {
+          let head = '';
+          if ((s.section || '') !== (section || '')) {
+            section = s.section || '';
+            if (section) head = `<div class="nav-flyout-sec">${section}</div>`;
+          }
           const cls  = ['nav-flyout-item', s.active ? 'active' : '', s.soon ? 'is-soon' : ''].filter(Boolean).join(' ');
           const href = s.soon ? '#' : s.href;
           const tab  = (s.tabs && s.tabs.length) ? ` data-goto-tab="${s.tabs[0]}"` : '';
-          return `<a class="${cls}" href="${href}"${tab}>` +
+          return head + `<a class="${cls}" href="${href}"${tab}>` +
                  `<span>${s.label}</span>` +
                  (s.soon ? '<span class="nav-badge-soon">Soon</span>' : '') +
                  `</a>`;
@@ -1067,6 +1125,70 @@
       if (sec < 5400) return Math.round(sec / 60) + 'm ago';
       if (sec < 172800) return Math.round(sec / 3600) + 'h ago';
       return Math.round(sec / 86400) + 'd ago';
+    },
+
+    // ── Invalid fields ────────────────────────────────────────────────────────────────────────
+    //
+    // An editor that refuses to save says why in one line at the foot of the panel. That line is
+    // easy to miss and, in a form of eight fields, it does not say WHICH one — so the operator
+    // reads the sentence, looks back at the form, and has to work it out. These mark the field.
+    //
+    // Orange rather than red: nothing is broken and nothing was lost. The panel is still open,
+    // the value is still there, and the operator is being asked to change it — which is the same
+    // thing every other orange on this console means (a checkpoint switched off, a key staged, a
+    // guardrail that will fail open).
+    //
+    // `clearInvalid` runs first on every validation pass, so a field that was flagged and then
+    // corrected stops being flagged without each caller having to remember.
+    clearInvalid(scope) {
+      if (scope) scope.querySelectorAll('.is-invalid').forEach(el => el.classList.remove('is-invalid'));
+    },
+
+    // `names` are data-f / data-pw style attribute values, or any selector. Returns false so a
+    // caller can `return markInvalid(...)` from a validation branch and keep it to one line.
+    markInvalid(scope, names) {
+      this.clearInvalid(scope);
+      if (!scope) return false;
+      (Array.isArray(names) ? names : [names]).forEach(n => {
+        // A bare name is expanded into the attribute forms the editors use; anything carrying
+        // selector punctuation is taken as written, so a page with its own convention can pass one.
+        const isSelector = n.includes('[') || n.includes('.') || n.includes('#') || n.includes(' ');
+        const sel = isSelector ? n : `[data-f="${n}"], [data-pw="${n}"], #${n}`;
+        scope.querySelectorAll(sel).forEach(el => el.classList.add('is-invalid'));
+      });
+      // The first one is what the operator should be looking at.
+      scope.querySelector('.is-invalid')?.focus?.();
+      return false;
+    },
+
+    // One editor refusal: say what is wrong at the top of the panel, and mark the field it is
+    // about. Replaces window.alert, which was drawn by the browser in the operating system's
+    // typography, said nothing about WHICH field, and had to be dismissed before the operator
+    // could look at the form again.
+    //
+    // The note is injected rather than expected in the markup so every editor gets it without
+    // each one growing a slot for it. Returns false, so a validation branch is one line:
+    //   if (!d.name) return NMS.utils.editorError(body, 'Name is required.', 'name');
+    editorError(scope, note, field) {
+      if (!scope) return false;
+      let el = scope.querySelector('.ed-error');
+      if (!el) {
+        el = document.createElement('div');
+        el.className = 'ed-error';
+        scope.insertBefore(el, scope.firstChild);
+      }
+      el.textContent = note;
+      if (field) this.markInvalid(scope, field);
+      else this.clearInvalid(scope);
+      return false;
+    },
+
+    // Called when a save is attempted, before the checks: a message left over from the previous
+    // attempt is a message about a field the operator may already have fixed.
+    clearEditorError(scope) {
+      if (!scope) return;
+      scope.querySelector('.ed-error')?.remove();
+      this.clearInvalid(scope);
     },
 
     // Enhance every <select> in a container with the custom dropdown below.

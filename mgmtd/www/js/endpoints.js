@@ -612,11 +612,20 @@
     return conns.filter(c => c.api_endpoint === oid || (c.endpoints || []).some(x => x.endpoint === oid)).length;
   }
 
-  function removeEndpoint(idx) {
+  async function removeEndpoint(idx) {
     const e = state.endpoints[idx];
     const used = usedByCount(e.oid);
-    if (used && !confirm(`${used} connector${used > 1 ? 's' : ''} still reference this endpoint. Delete anyway?`))
-      return false;
+    if (used)
+    {
+      const ok = await window.NMS.confirm({
+        title: 'Remove endpoint',
+        message: `${used} connector${used > 1 ? 's' : ''} still reference this endpoint.`,
+        detail: 'They will show as missing until you point them somewhere else.',
+        confirmLabel: 'Remove anyway',
+      });
+      if (!ok)
+        return false;
+    }
     state.endpoints.splice(idx, 1);
     stage();
     return true;
@@ -677,29 +686,33 @@
     document.getElementById('epOverlay').onclick = closeEditor;
 
     const del = document.getElementById('epDelete');
-    if (del) del.onclick = () => { if (removeEndpoint(editIdx)) { closeEditor(); render(); } };
+    if (del) del.onclick = async () => { if (await removeEndpoint(editIdx)) { closeEditor(); render(); } };
 
     document.getElementById('epSave').onclick = () => {
+      window.NMS.utils.clearEditorError(body);
       const e = collect(body);
-      if (!e.name) { alert('Name is required.'); return; }
-      if (!e.path || e.path[0] !== '/') { alert('Path must start with /'); return; }
+      if (!e.name) return window.NMS.utils.editorError(body, 'Name is required.', 'name');
+      if (!e.path || e.path[0] !== '/')
+        return window.NMS.utils.editorError(body, 'Path must start with /', 'path');
 
       if (isSase(e)) {
-        if (!e.host) { alert('Host is required, e.g. api.sase.paloaltonetworks.com'); return; }
-        if (e.host.indexOf('/') !== -1) { alert('Host is a hostname only — put the rest in Path.'); return; }
-        if (e.headers.some(h => h.name.toLowerCase() === 'authorization')) {
-          alert('Authorization is added for you from the API Credential — remove it here.'); return;
-        }
+        if (!e.host) return window.NMS.utils.editorError(body, 'Host is required.', 'host');
+        if (e.host.indexOf('/') !== -1)
+          return window.NMS.utils.editorError(body, 'Host is a hostname only — put the rest in Path.', 'host');
+        if (e.headers.some(h => h.name.toLowerCase() === 'authorization'))
+          return window.NMS.utils.editorError(
+            body, 'Authorization is added for you from the API Credential — remove it here.');
         // Caught at save rather than at test time: a wrong or missing region answers 424
         // "tenant not found", which does not read as a header problem at all.
-        if (e.subtype === 'ztna' && !e.headers.some(h => h.name.toLowerCase() === 'x-panw-region' && h.value)) {
-          alert('The ZTNA API needs an x-panw-region header with a value — americas, au, ca, de, europe, in, jp, sg or uk.');
-          return;
-        }
+        if (e.subtype === 'ztna' && !e.headers.some(h => h.name.toLowerCase() === 'x-panw-region' && h.value))
+          return window.NMS.utils.editorError(
+            body, 'The ZTNA API needs an x-panw-region header with a value — americas, au, ca, de, '
+                + 'europe, in, jp, sg or uk.');
       } else if (e.subtype === 'xml' && !e.params.some(p => p.name === 'type')) {
         // Every PAN-OS XML API request needs a type= (op, config, commit, …); without it the device
         // answers "type is required", so catch it here rather than at test time.
-        alert('An XML API URL needs a type= parameter, e.g. /api?type=op&cmd=…'); return;
+        return window.NMS.utils.editorError(
+          body, 'An XML API URL needs a type= parameter, e.g. /api?type=op&cmd=…', 'path');
       }
       if (editIdx == null) state.endpoints.push(e); else state.endpoints[editIdx] = e;
       stage();
@@ -900,8 +913,8 @@
   function wireRows(scope) {
     scope.querySelectorAll('[data-edit]').forEach(b =>
       b.addEventListener('click', () => openEditor(+b.dataset.edit)));
-    scope.querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', () => {
-      if (removeEndpoint(+b.dataset.del)) render();
+    scope.querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', async () => {
+      if (await removeEndpoint(+b.dataset.del)) render();
     }));
     scope.querySelectorAll('[data-test]').forEach(b =>
       b.addEventListener('click', () => openTestPicker(+b.dataset.test)));

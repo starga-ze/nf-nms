@@ -6,7 +6,10 @@
 #include "router/MgmtdTxRouter.h"
 #include "grpc/GrpcMessage.h"
 
+#include "db/Database.h"
 #include "http/HttpMessage.h"
+#include "ipc/IpcMessage.h"
+#include "ipc/IpcProtocol.h"
 #include "util/Logger.h"
 
 #include <nlohmann/json.hpp>
@@ -111,6 +114,72 @@ std::vector<GrpcMessage::Turn> parseHistory(const json& input)
     return out;
 }
 
+// The signed-in account's identity, as the conversations are owned by. Empty when the session has
+// gone, which is what stops a turn being filed under nobody.
+std::string ownerOf(MgmtdServiceManager& sm, const pz::http::HttpRequest& req)
+{
+    const std::string user = sm.authService().sessionUser(sessionCookie(req));
+    if (user.empty())
+        return {};
+    try
+    {
+        const auto rows = pz::db::Database::instance().queryRows(
+            "SELECT oid FROM local_users WHERE username = $1 LIMIT 1", {user});
+        if (!rows.empty() && !rows.front().empty())
+            return rows.front()[0];
+    }
+    catch (const std::exception& ex)
+    {
+        LOG_WARN("owner lookup failed for '{}': {}", user, ex.what());
+    }
+    return {};
+}
+
+// Hands a finished turn to engined, the only database writer. Both halves in one message: a turn is
+// one thing, and a pair that could half-land would leave a question on screen with no answer under
+// it.
+void storeTurn(MgmtdServiceManager& sm, const MgmtdServiceManager::ChatContext& ctx,
+               const json& answer)
+{
+    if (ctx.sessionOid.empty() || ctx.ownerOid.empty() || ctx.questionOid.empty())
+        return;
+
+    json question = {{"oid", ctx.questionOid},
+                     {"seq", ctx.seq},
+                     {"role", "user"},
+                     {"content", ctx.question}};
+
+    json reply = {{"oid", ctx.answerOid},
+                  {"seq", ctx.seq + 1},
+                  {"role", "assistant"},
+                  {"content", answer.value("reply", std::string())},
+                  {"model", answer.value("model", ctx.model)},
+                  {"ok", answer.value("ok", false)},
+                  {"code", answer.value("code", std::string())},
+                  {"latency_ms", answer.value("latency_ms", 0)}};
+    // The verdict, whole. It is most of the reason the conversation is kept at all — a blocked
+    // turn's findings used to vanish with the browser that held them.
+    if (answer.contains("scan"))
+        reply["scan"] = answer["scan"];
+
+    json payload = {{"session", ctx.sessionOid},
+                    {"owner", ctx.ownerOid},
+                    {"service", ctx.service},
+                    {"title", ctx.title},
+                    {"model", ctx.model},
+                    {"draft", ctx.draft},
+                    {"messages", json::array({std::move(question), std::move(reply)})}};
+
+    const std::string body = payload.dump();
+    auto msg = std::make_unique<pz::ipc::IpcMessage>();
+    msg->setSrc(pz::ipc::IpcDaemon::Mgmtd);
+    msg->setDst(pz::ipc::IpcDaemon::Engined);
+    msg->setCmd(pz::ipc::IpcCmd::ChatTurnStore);
+    msg->setFlags(pz::ipc::IpcProtocol::toFlag(pz::ipc::IpcFlag::Request));
+    msg->setPayload(std::vector<std::uint8_t>(body.begin(), body.end()));
+    sm.txRouter().handleIpcMessage(std::move(msg));
+}
+
 }
 
 void ChatController::models(MgmtdServiceManager& sm, const pz::http::HttpRequest&, pz::http::HttpResponse& resp)
@@ -146,6 +215,23 @@ void ChatController::send(MgmtdServiceManager& sm, const pz::http::HttpRequest& 
 
     const std::uint32_t ticket = sm.nextChatTicket();
     const std::string transactionId = newTransactionId();
+
+    // Held for the poll that collects the answer. The browser sends the conversation's own fields
+    // — its id, its name, what is typed and not yet sent — because those are its to know; it does
+    // NOT send the owner, which is resolved from the cookie below. A client that could name the
+    // owner could write into someone else's conversation.
+    MgmtdServiceManager::ChatContext ctx;
+    ctx.sessionOid = sessionId;
+    ctx.ownerOid = ownerOf(sm, req);
+    ctx.service = input.value("service", std::string("chat"));
+    ctx.title = input.value("title", std::string());
+    ctx.model = model;
+    ctx.draft = input.value("draft", std::string());
+    ctx.question = message;
+    ctx.questionOid = input.value("question_oid", std::string());
+    ctx.answerOid = input.value("answer_oid", std::string());
+    ctx.seq = input.value("seq", 0);
+    sm.setChatContext(ticket, std::move(ctx));
 
     // Delegated through the router, same as the old IPC path — the controller does not know or
     // care that the transport underneath is now gRPC to the pretzel-ai service. The turn is
@@ -199,8 +285,170 @@ void ChatController::result(MgmtdServiceManager& sm, const pz::http::HttpRequest
                                R"("error":"malformed answer from pretzel-ai"})");
     }
 
+    // Filed on the way past. The browser gets the same document it always did — storing it is not
+    // something it waits on, and a failure here must not cost the operator their answer.
+    if (auto ctx = sm.takeChatContext(ticket))
+        storeTurn(sm, *ctx, body);
+
     body["status"] = "done";
     fill(resp, 200, body.dump());
+}
+
+void ChatController::sessions(MgmtdServiceManager& sm, const pz::http::HttpRequest& req, pz::http::HttpResponse& resp)
+{
+    const std::string owner = ownerOf(sm, req);
+    if (owner.empty())
+        return fill(resp, 401, R"({"error":"unauthorized"})");
+
+    json out = json::array();
+    try
+    {
+        // Filtered on the owner in the query, not after it. There is no path here that reads
+        // someone else's row and then decides not to return it.
+        for (const auto& r : pz::db::Database::instance().queryRows(
+                 "SELECT s.oid, s.service, s.title, s.model, s.draft, "
+                 "       to_char(s.created_at, 'YYYY-MM-DD\"T\"HH24:MI:SSOF'), "
+                 "       to_char(s.updated_at, 'YYYY-MM-DD\"T\"HH24:MI:SSOF'), "
+                 "       (SELECT count(*) FROM chat_message m WHERE m.session = s.oid) "
+                 "FROM chat_session s WHERE s.owner = $1 ORDER BY s.updated_at DESC",
+                 {owner}))
+        {
+            if (r.size() < 8)
+                continue;
+            out.push_back({{"oid", r[0]}, {"service", r[1]}, {"title", r[2]}, {"model", r[3]},
+                           {"draft", r[4]}, {"created_at", r[5]}, {"updated_at", r[6]},
+                           {"messages", std::strtol(r[7].c_str(), nullptr, 10)}});
+        }
+    }
+    catch (const std::exception& ex)
+    {
+        LOG_WARN("chat session list failed: {}", ex.what());
+        return fill(resp, 503, R"({"error":"the conversations could not be read"})");
+    }
+
+    fill(resp, 200, json{{"sessions", std::move(out)}}.dump());
+}
+
+void ChatController::session(MgmtdServiceManager& sm, const pz::http::HttpRequest& req, pz::http::HttpResponse& resp)
+{
+    const std::string owner = ownerOf(sm, req);
+    if (owner.empty())
+        return fill(resp, 401, R"({"error":"unauthorized"})");
+
+    const std::string oid = queryParam(req.target, "oid");
+    if (oid.empty())
+        return fill(resp, 400, R"({"error":"oid is required"})");
+
+    json out = json::array();
+    try
+    {
+        // The owner is joined in rather than checked afterwards: knowing a conversation's id must
+        // not be enough to read it.
+        for (const auto& r : pz::db::Database::instance().queryRows(
+                 "SELECT m.oid, m.seq, m.role, m.content, COALESCE(m.model,''), "
+                 "       COALESCE(m.ok::int::text,''), COALESCE(m.code,''), "
+                 "       COALESCE(m.latency_ms::text,''), COALESCE(m.scan::text,''), "
+                 "       to_char(m.created_at, 'YYYY-MM-DD\"T\"HH24:MI:SSOF') "
+                 "FROM chat_message m JOIN chat_session s ON s.oid = m.session "
+                 "WHERE m.session = $1 AND s.owner = $2 ORDER BY m.seq",
+                 {oid, owner}))
+        {
+            if (r.size() < 10)
+                continue;
+            json m = {{"oid", r[0]}, {"seq", std::strtol(r[1].c_str(), nullptr, 10)},
+                      {"role", r[2]}, {"content", r[3]}, {"created_at", r[9]}};
+            if (!r[4].empty()) m["model"] = r[4];
+            if (!r[5].empty()) m["ok"] = (r[5] == "1");
+            if (!r[6].empty()) m["code"] = r[6];
+            if (!r[7].empty()) m["latency_ms"] = std::strtol(r[7].c_str(), nullptr, 10);
+            if (!r[8].empty())
+            {
+                json scan = json::parse(r[8], nullptr, false);
+                if (!scan.is_discarded())
+                    m["scan"] = std::move(scan);
+            }
+            out.push_back(std::move(m));
+        }
+    }
+    catch (const std::exception& ex)
+    {
+        LOG_WARN("chat message read failed: {}", ex.what());
+        return fill(resp, 503, R"({"error":"the conversation could not be read"})");
+    }
+
+    fill(resp, 200, json{{"oid", oid}, {"messages", std::move(out)}}.dump());
+}
+
+void ChatController::sessionDelete(MgmtdServiceManager& sm, const pz::http::HttpRequest& req, pz::http::HttpResponse& resp)
+{
+    const std::string owner = ownerOf(sm, req);
+    if (owner.empty())
+        return fill(resp, 401, R"({"error":"unauthorized"})");
+
+    json input = json::parse(req.body, nullptr, false);
+    if (input.is_discarded())
+        return fill(resp, 400, R"({"error":"invalid JSON body"})");
+
+    const std::string oid = input.value("oid", std::string());
+    if (oid.empty())
+        return fill(resp, 400, R"({"error":"oid is required"})");
+
+    // The owner travels with it. engined matches on both, so the check is made twice — once here
+    // where the session is known, and once at the write where the row is.
+    const json payload = {{"delete", true}, {"session", oid}, {"owner", owner}};
+    const std::string body = payload.dump();
+
+    auto msg = std::make_unique<pz::ipc::IpcMessage>();
+    msg->setSrc(pz::ipc::IpcDaemon::Mgmtd);
+    msg->setDst(pz::ipc::IpcDaemon::Engined);
+    msg->setCmd(pz::ipc::IpcCmd::ChatTurnStore);
+    msg->setFlags(pz::ipc::IpcProtocol::toFlag(pz::ipc::IpcFlag::Request));
+    msg->setPayload(std::vector<std::uint8_t>(body.begin(), body.end()));
+    sm.txRouter().handleIpcMessage(std::move(msg));
+
+    LOG_INFO("chat session removal handed to engined (session={})", oid);
+    fill(resp, 202, json{{"oid", oid}, {"status", "pending"}}.dump());
+}
+
+void ChatController::sessionPatch(MgmtdServiceManager& sm, const pz::http::HttpRequest& req, pz::http::HttpResponse& resp)
+{
+    const std::string owner = ownerOf(sm, req);
+    if (owner.empty())
+        return fill(resp, 401, R"({"error":"unauthorized"})");
+
+    json input = json::parse(req.body, nullptr, false);
+    if (input.is_discarded())
+        return fill(resp, 400, R"({"error":"invalid JSON body"})");
+
+    const std::string oid = input.value("oid", std::string());
+    if (oid.empty())
+        return fill(resp, 400, R"({"error":"oid is required"})");
+
+    // A conversation with no turns yet has no row, and that is correct: it is a name on a screen
+    // until someone says something. So this updates and does not create — the first turn is what
+    // brings it into being.
+    MgmtdServiceManager::ChatContext ctx;
+    ctx.sessionOid = oid;
+    ctx.ownerOid = owner;
+    ctx.title = input.value("title", std::string());
+    ctx.draft = input.value("draft", std::string());
+
+    const json payload = {{"patch", true},
+                          {"session", oid},
+                          {"owner", owner},
+                          {"title", ctx.title},
+                          {"draft", ctx.draft}};
+    const std::string body = payload.dump();
+
+    auto msg = std::make_unique<pz::ipc::IpcMessage>();
+    msg->setSrc(pz::ipc::IpcDaemon::Mgmtd);
+    msg->setDst(pz::ipc::IpcDaemon::Engined);
+    msg->setCmd(pz::ipc::IpcCmd::ChatTurnStore);
+    msg->setFlags(pz::ipc::IpcProtocol::toFlag(pz::ipc::IpcFlag::Request));
+    msg->setPayload(std::vector<std::uint8_t>(body.begin(), body.end()));
+    sm.txRouter().handleIpcMessage(std::move(msg));
+
+    fill(resp, 202, json{{"oid", oid}, {"status", "pending"}}.dump());
 }
 
 }

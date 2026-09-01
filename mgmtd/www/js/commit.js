@@ -268,6 +268,53 @@
     close: closeModal,
   };
 
+  // ── Confirm ─────────────────────────────────────────────────────────────────────────────────
+  //
+  // The console's own dialog, in place of window.confirm. Not cosmetic: the native one is drawn by
+  // the browser in the operating system's language and typography, so a destructive step — the one
+  // moment the page most needs to look like it belongs to this appliance — was the one that did
+  // not. It also cannot be styled, cannot carry a danger colour on the confirming button, and its
+  // wording ("OK") says nothing about what is about to happen.
+  //
+  // Built on NMS.modal so it stacks above a slide-over the same way the review diff does, and so a
+  // page that has an editor open can ask without being dismissed.
+  //
+  // Promise-based rather than callback: the callers are `async` already, and `if (!await ...) return;`
+  // reads the way the `if (!confirm(...)) return;` it replaces did.
+  window.NMS.confirm = function (opts) {
+    const o = typeof opts === 'string' ? { message: opts } : (opts || {});
+    return new Promise((resolve) => {
+      let settled = false;
+      const done = (v) => {
+        if (settled) return;
+        settled = true;
+        closeModal();
+        resolve(v);
+      };
+
+      const body = `<p class="cf-msg">${esc(o.message || 'Are you sure?')}</p>`
+        + (o.detail ? `<p class="cf-detail">${esc(o.detail)}</p>` : '');
+      const ov = window.NMS.modal.open(
+        o.title || 'Confirm', body,
+        `<button class="btn-sm" id="cfNo">${esc(o.cancelLabel || 'Cancel')}</button>
+         <button class="btn-primary btn-sm${o.danger === false ? '' : ' is-danger'}" id="cfYes">${
+           esc(o.confirmLabel || 'Remove')}</button>`);
+
+      ov.querySelector('#cfNo').addEventListener('click', () => done(false));
+      ov.querySelector('#cfYes').addEventListener('click', () => done(true));
+      ov.querySelector('#cfYes').focus();
+
+      // Dismissing by any other route is a no. The overlay's own backdrop click and the head's
+      // close cross both run closeModal without telling us, so the promise is settled here rather
+      // than left pending for the life of the page.
+      ov.addEventListener('click', (e) => { if (e.target === ov) done(false); }, { once: true });
+      ov.querySelector('#cmClose')?.addEventListener('click', () => done(false), { once: true });
+      document.addEventListener('keydown', function onKey(e) {
+        if (e.key === 'Escape') { document.removeEventListener('keydown', onKey, true); done(false); }
+      }, true);
+    });
+  };
+
   // ── Device-test panel (shared by the API Key, Endpoint, Connector and SASE tests) ───────────
   //
   // One renderer for all four so a test looks the same wherever it is run from, and so the running

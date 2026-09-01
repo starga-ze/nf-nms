@@ -204,12 +204,22 @@ html, body {
 }
 .sidebar-nav::-webkit-scrollbar { display: none; }
 
-.nav-section-label {
+/* The three uppercase micro-labels — the sidebar's section, the flyout's title, the flyout's
+   section — are the same kind of thing and were drifting apart: three letter-spacings (.11/.12/.13),
+   two paddings and one stray opacity, which read as three sizes rather than one label used three
+   times. Type is shared here; only the vertical rhythm differs below, because that is a spacing
+   question and not a typographic one. */
+.nav-section-label,
+.nav-flyout-title,
+.nav-flyout-sec {
   font-size: 8.5px;
   font-weight: 700;
   letter-spacing: .12em;
   text-transform: uppercase;
   color: var(--sb-muted);
+}
+
+.nav-section-label {
   padding: 11px 9px 3px;
   white-space: nowrap;
   overflow: hidden;
@@ -384,14 +394,16 @@ html, body {
   transition: opacity .12s ease, transform .12s ease, visibility .12s;
 }
 .nav-flyout.visible { opacity: 1; visibility: visible; transform: none; }
-.nav-flyout-title {
-  font-size: 8.5px;
-  font-weight: 700;
-  letter-spacing: .13em;
-  text-transform: uppercase;
-  color: var(--sb-muted);
-  padding: 4px 9px;
-}
+.nav-flyout-title { padding: 4px 9px 5px; }
+/* A heading inside the flyout. Same type as the title above it — it is the same kind of label —
+   and told apart by position and by the space above it rather than by being drawn smaller.
+   The item below it carries `margin: 1px 0`, so the bottom pad is 2px to land on the same rhythm
+   as the gap between two items. */
+.nav-flyout-sec { padding: 10px 9px 2px; }
+/* Except the first, which sits directly under the title and would otherwise open with a gap wider
+   than the one separating the sections it exists to separate. */
+.nav-flyout-title + .nav-flyout-sec { padding-top: 1px; }
+
 .nav-flyout-item {
   display: flex;
   align-items: center;
@@ -4191,3 +4203,196 @@ input::placeholder, textarea::placeholder { color: var(--text-muted); opacity: 1
 .field-hint.bad { color: var(--ink-red); }
 .btn-sm.danger { color: var(--ink-red); }
 .btn-sm.danger:hover { background: var(--tint-red); }
+
+/* ── AI Guardrail (www/js/ai-guardrail.js) ─────────────────────────────────────
+   A Configuration table like the others: rows, an Add button, a slideover editor. The rows are the
+   two engines pretzel-ai runs, and each says who inspects its turns and where. */
+.cfg-table-aiguard { table-layout: fixed; width: 100%; }
+.cfg-table-aiguard th { font-size: 9.5px; padding: 8px 12px; }
+.cfg-table-aiguard td { font-size: 11px; padding: 7px 12px; vertical-align: middle; }
+.cfg-table-aiguard .muted { color: var(--text-muted); opacity: .6; }
+.cfg-table-aiguard .col-name   { width: 20%; }
+.cfg-table-aiguard .col-guard  { width: 26%; }
+.cfg-table-aiguard .col-points { width: auto; }
+.cfg-table-aiguard .col-key    { width: 16%; }
+.cfg-table-aiguard .col-act    { width: 8%; text-align: right; white-space: nowrap; }
+.cfg-table-aiguard td.col-act .icon-btn { width: 26px; height: 26px; margin-left: 6px; }
+.cfg-table-aiguard td.col-act .icon-btn svg { width: 13px; height: 13px; }
+
+/* A row's checkpoints, as four pills in the order a turn passes through them. Pills rather than
+   "2 of 4": which two is the fact a scan report has to be read against, and a count does not say. */
+.gr-pills { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.gr-pill {
+  font-size: 9.5px; font-weight: 600; letter-spacing: .01em;
+  border-radius: 999px; padding: 2px 7px; white-space: nowrap;
+}
+.gr-pill.is-on  { color: var(--ink-green); background: var(--tint-green); }
+.gr-pill.is-off { color: var(--ink-orange); background: var(--tint-orange); }
+/* Not "off" — absent. Struck through rather than tinted, because a colour would put it on the same
+   scale as a choice somebody made, and this one was never available to make. */
+.gr-pill.is-na  { color: var(--text-muted); opacity: .5; text-decoration: line-through; }
+.gr-pill-n { margin-left: 3px; font-size: 10px; color: var(--text-muted); font-weight: 600; }
+
+/* On the service name: this engine is configurable but not yet served. */
+.gr-tag {
+  margin-left: 7px; font-size: 9px; font-weight: 700; letter-spacing: .03em;
+  text-transform: uppercase; color: var(--ink-orange); background: var(--tint-orange);
+  border-radius: 4px; padding: 1px 5px; vertical-align: middle;
+}
+.gr-notice {
+  margin: -4px 0 13px; padding: 9px 11px; border-radius: 8px;
+  font-size: 11.5px; line-height: 1.55; color: var(--ink-orange); background: var(--tint-orange);
+}
+
+/* Guardrail type. Cards rather than a dropdown: each option carries a consequence worth reading
+   before it is chosen, and a select hides two of the three at the moment of choosing. */
+.gr-kinds { display: flex; flex-direction: column; gap: 7px; }
+.gr-kind {
+  position: relative;          /* the radio is hidden inside it and must not escape the card */
+  display: flex; flex-direction: column; gap: 3px;
+  padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px;
+  cursor: pointer; transition: border-color var(--tr), background var(--tr);
+}
+.gr-kind:hover { background: var(--surface-hover); }
+.gr-kind.on { border-color: var(--accent); background: var(--sb-active-bg); }
+.gr-kind input { position: absolute; opacity: 0; pointer-events: none; }
+.gr-kind-t { font-size: 12.5px; font-weight: 600; color: var(--text); }
+.gr-kind-n { font-size: 11px; color: var(--text-muted); line-height: 1.5; }
+
+/* One checkbox with its consequence spelled out beside it. The <em> is the sentence that keeps an
+   operator from flipping it on the strength of the label alone. */
+.gr-check { display: flex; align-items: flex-start; gap: 9px; margin-top: 4px; cursor: pointer; }
+.gr-check input { margin-top: 2px; flex: none; }
+.gr-check b { display: block; font-size: 12.5px; font-weight: 600; color: var(--text); }
+.gr-check em {
+  display: block; margin-top: 2px; font-style: normal;
+  font-size: 11px; color: var(--text-muted); line-height: 1.55;
+}
+
+/* The four points, in the order a turn passes through them. */
+.gr-sec-note { margin: -4px 0 10px; font-size: 11.5px; color: var(--text-muted); line-height: 1.55; }
+.gr-unit { margin-left: 8px; font-size: 11.5px; color: var(--text-muted); }
+.gr-points { display: flex; flex-direction: column; gap: 1px; }
+.gr-point {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 9px 10px; border-radius: 9px; cursor: pointer;
+  transition: background var(--tr);
+}
+.gr-point:hover { background: var(--surface-hover); }
+.gr-point input { margin-top: 2px; flex: none; }
+.gr-point-b { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.gr-point-t { font-size: 12.5px; font-weight: 600; color: var(--text); }
+.gr-point-w { font-size: 11px; color: var(--text-muted); line-height: 1.5; }
+/* Shown only while the point is off, which is the only time it is a warning rather than trivia. */
+.gr-point-warn { margin-top: 2px; font-size: 11px; color: var(--ink-orange); line-height: 1.5; }
+/* The state, in words. A bare unticked box says "off"; it does not say that off means the report
+   will read "not inspected" rather than "clean", which is the distinction this page exists to keep. */
+.gr-point-s {
+  flex: 0 0 auto; align-self: center;
+  font-size: 10.5px; font-weight: 600; color: var(--ink-green);
+}
+.gr-point.is-off { background: var(--tint-orange); }
+.gr-point.is-off:hover { background: var(--tint-orange); filter: brightness(.98); }
+.gr-point.is-off .gr-point-s { color: var(--ink-orange); }
+/* Unavailable, not switched off. Dimmed and inert — nothing here is a choice being withheld. */
+.gr-point.is-na { opacity: .5; cursor: default; }
+.gr-point.is-na:hover { background: none; }
+.gr-point.is-na .gr-point-s { color: var(--text-muted); }
+
+/* The key. Same three states as a vendor's, in a row rather than a table cell. */
+.gr-key { display: flex; gap: 8px; align-items: center; }
+.gr-key input { flex: 1 1 auto; min-width: 0; }
+.gr-key-staged { display: flex; gap: 10px; align-items: center; }
+.gr-hint { margin-top: 5px; font-size: 11px; color: var(--text-muted); line-height: 1.5; }
+.gr-key-off {
+  font-size: 11.5px; color: var(--ink-orange); background: var(--tint-orange);
+  border-radius: 8px; padding: 8px 11px; line-height: 1.55;
+}
+.gr-key-off code {
+  font-family: var(--font-mono); font-size: 10.5px;
+  background: var(--surface-2); border-radius: 4px; padding: 1px 4px;
+}
+
+/* What an editor says when it will not save. At the top of the panel rather than the foot: the
+   foot is below the fold on a long form, and a message you have to scroll to is a message that
+   reads as nothing happening when you press Save. */
+.ed-error {
+  margin: 0 0 14px; padding: 9px 12px; border-radius: 8px;
+  font-size: 11.5px; line-height: 1.55;
+  color: var(--ink-orange); background: var(--tint-orange);
+}
+
+/* A field an editor is refusing to save on. Orange, not red: nothing is broken and nothing was
+   lost — the panel is open, the value is still there, and the operator is being asked to change it.
+   That is what every other orange on this console means.
+
+   The note at the foot of the panel says what is wrong; this says where. One without the other is
+   half an answer, and the foot note alone was the half that made people hunt. */
+.field-row input.is-invalid,
+.field-row select.is-invalid,
+.field-row textarea.is-invalid,
+input.is-invalid,
+textarea.is-invalid {
+  border-color: var(--orange);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--orange) 14%, transparent);
+}
+/* The themed dropdown hides its <select>, so the ring has to go on the control that is drawn. */
+.cs:has(select.is-invalid) .cs-trigger {
+  border-color: var(--orange);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--orange) 14%, transparent);
+}
+/* Correcting the field clears it — the focus ring takes over so the two never fight. */
+.is-invalid:focus { box-shadow: 0 0 0 3px color-mix(in srgb, var(--orange) 22%, transparent); }
+
+/* The shared confirm dialog (NMS.confirm, www/js/commit.js). Renders into the same centre-screen
+   modal as the review diff, so a destructive step looks like it belongs to this console rather than
+   to the operating system. */
+.cf-msg { margin: 0; font-size: 13px; line-height: 1.6; color: var(--text); }
+.cf-detail { margin: 9px 0 0; font-size: 11.5px; line-height: 1.6; color: var(--text-muted); }
+/* The confirming button carries the consequence. A dialog whose two buttons look alike is one
+   people dismiss by muscle memory. */
+.cm-foot .btn-primary.is-danger {
+  background: var(--red); border-color: var(--red); color: #fff;
+}
+.cm-foot .btn-primary.is-danger:hover { filter: brightness(1.08); }
+
+/* ── User Management (www/js/users.js) ─────────────────────────────────────────
+   The same Configuration table as its neighbours; only the columns differ. */
+.cfg-table-user { table-layout: fixed; width: 100%; }
+.cfg-table-user th { font-size: 9.5px; padding: 8px 12px; }
+.cfg-table-user td { font-size: 11px; padding: 7px 12px; vertical-align: middle; }
+.cfg-table-user .col-name { width: auto; }
+.cfg-table-user .col-role { width: 16%; }
+.cfg-table-user .col-act  { width: 10%; text-align: right; white-space: nowrap; }
+.cfg-table-user td.col-act .icon-btn { width: 26px; height: 26px; margin-left: 6px; }
+.cfg-table-user td.col-act .icon-btn svg { width: 13px; height: 13px; }
+/* A disabled row action is the rule stated in place — the two that cannot be removed are the
+   account you are signed in as and the last one left. The title says which. */
+.cfg-table-user td.col-act .icon-btn[disabled] { opacity: .3; cursor: not-allowed; }
+.cfg-table-user td.col-act .icon-btn[disabled]:hover { background: none; color: inherit; }
+
+/* The role, as a badge. Both roles get one: leaving `user` as bare muted text made it read as an
+   empty cell beside the tinted Admin, so the column looked half-filled rather than like two states
+   of one thing.
+   Orange for admin because it is the role that can change who may sign in — the same weight this
+   console gives every other "read this before you rely on it". Green for user because it is the
+   ordinary case, not a lesser one. */
+.usr-role {
+  display: inline-block;
+  font-size: 10.5px; font-weight: 600;
+  border-radius: 4px; padding: 1px 7px;
+}
+.usr-role.is-admin { color: var(--ink-orange); background: var(--tint-orange); }
+.usr-role.is-user  { color: var(--ink-green);  background: var(--tint-green); }
+
+/* Marks beside a name, and only when there is something to say: which row is you, and whichever of
+   the password's states is not the ordinary one. The plain form is an orientation aid rather than a
+   status, so it stays grey; the two that mean "this row is not settled" are tinted. */
+.usr-tag {
+  margin-left: 7px; font-size: 9px; font-weight: 700; letter-spacing: .04em;
+  text-transform: uppercase; color: var(--text-muted); background: var(--surface-2);
+  border-radius: 4px; padding: 1px 5px; vertical-align: middle;
+}
+.usr-tag.is-staged { color: var(--ink-orange); background: var(--tint-orange); }
+.usr-tag.is-drop   { color: var(--ink-red); background: var(--tint-red); }
+

@@ -12,13 +12,6 @@ bool IpcdCore::onInit()
 {
     LOG_INFO("ipcd: starting up");
 
-    m_threadManager = std::make_unique<ThreadManager>();
-    if (!m_threadManager)
-    {
-        LOG_ERROR("dependency check failed");
-        return false;
-    }
-
     m_ipcServer = std::make_unique<IpcServer>(ipcConfig(), pz::ipc::IpcDaemon::Ipcd);
     if (!m_ipcServer->init())
     {
@@ -78,13 +71,6 @@ void IpcdCore::onLoop()
 void IpcdCore::onShutdown()
 {
     LOG_INFO("ipcd: shutting down");
-
-    if (m_threadManager)
-    {
-        m_threadManager->stopAll();
-    }
-
-    LOG_INFO("all threads stopped");
 
     pz::util::Logger::Shutdown();
 }

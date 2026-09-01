@@ -172,6 +172,25 @@ WebService::Resolved WebService::resolve(const std::string& method, const std::s
         {"POST", "/api/ai/credential",
             Match::Exact,  WebRoute::AiCredentialStore, Access::Authenticated, false},
 
+        // The assistant's conversations. Kept on the appliance so they survive a sign-out and are
+        // there from a second machine — which is what they were not while they lived in a browser.
+        {"GET",  "/api/chat/sessions",
+            Match::Exact,  WebRoute::ChatSessions,      Access::Authenticated, false},
+        {"GET",  "/api/chat/session",
+            Match::Exact,  WebRoute::ChatSession,       Access::Authenticated, false},
+        {"POST", "/api/chat/session/delete",
+            Match::Exact,  WebRoute::ChatSessionDelete, Access::Authenticated, false},
+        {"POST", "/api/chat/session/patch",
+            Match::Exact,  WebRoute::ChatSessionPatch,  Access::Authenticated, false},
+
+        // The local accounts' passwords. Off the settings-commit path for the same reason a vendor
+        // key is: running_config is append-versioned and diffed, and a password there would be
+        // permanent, readable, and would mint a config version every time it changed.
+        {"GET",  "/api/user/credentials",
+            Match::Exact,  WebRoute::UserCredentials,     Access::Authenticated, false},
+        {"POST", "/api/user/credential",
+            Match::Exact,  WebRoute::UserCredentialStore, Access::Authenticated, false},
+
         // API collection — the read side of the collector's output.
         {"GET",  "/api/collection/overview",
             Match::Prefix, WebRoute::CollectionOverview, Access::Authenticated, false},
@@ -287,7 +306,7 @@ void WebService::route(MgmtdServiceManager& sm, const Request& req, Response& re
         // The must-change-password lock: an authenticated operator with a pending forced change may
         // reach only the change-password route until it is done.
         if (!r.mustChangeExempt && req.target.rfind("/api/", 0) == 0 &&
-            sm.authService().mustChangePassword())
+            sm.authService().mustChangePassword(sessionCookie(req)))
         {
             return fill(resp, 403, R"({"error":"password change required","code":"MUST_CHANGE_PASSWORD"})");
         }
@@ -332,6 +351,14 @@ void WebService::route(MgmtdServiceManager& sm, const Request& req, Response& re
 
     case WebRoute::AiCredentials:      return m_aiController.credentials(sm, req, resp);
     case WebRoute::AiCredentialStore:  return m_aiController.credentialStore(sm, req, resp);
+
+    case WebRoute::ChatSessions:       return m_chatController.sessions(sm, req, resp);
+    case WebRoute::ChatSession:        return m_chatController.session(sm, req, resp);
+    case WebRoute::ChatSessionDelete:  return m_chatController.sessionDelete(sm, req, resp);
+    case WebRoute::ChatSessionPatch:   return m_chatController.sessionPatch(sm, req, resp);
+
+    case WebRoute::UserCredentials:     return m_userController.credentials(sm, req, resp);
+    case WebRoute::UserCredentialStore: return m_userController.credentialStore(sm, req, resp);
 
     case WebRoute::CollectionOverview: return m_collectionController.overview(sm, req, resp);
     case WebRoute::CollectionSamples:  return m_collectionController.samples(sm, req, resp);

@@ -170,7 +170,7 @@ TEST(IpcProtocolNaming, EveryCommandHasAName)
     // makes every log line about it useless. These are the ones the API connector path uses.
     const IpcCmd cmds[] = {IpcCmd::ClientHello,
                            IpcCmd::ServerHello,
-                           IpcCmd::AdminPasswordUpdate,
+                           IpcCmd::LocalUserUpdate,
                            IpcCmd::ApiCredentialStateUpdate,
                            IpcCmd::ApiConnectorTestRequest,
                            IpcCmd::ApiConnectorTestResponse,
@@ -191,5 +191,5 @@ TEST(IpcProtocolNaming, DistinctCommandsHaveDistinctNames)
     EXPECT_STRNE(IpcProtocol::cmdToStr(IpcCmd::ApiConnectorTestRequest),
                  IpcProtocol::cmdToStr(IpcCmd::ApiConnectorTestResponse));
     EXPECT_STRNE(IpcProtocol::cmdToStr(IpcCmd::ApiCredentialStateUpdate),
-                 IpcProtocol::cmdToStr(IpcCmd::AdminPasswordUpdate));
+                 IpcProtocol::cmdToStr(IpcCmd::LocalUserUpdate));
 }

@@ -94,6 +94,28 @@ public:
     void appendChatPartial(std::uint32_t ticket, const std::string& delta);
     std::string chatPartial(std::uint32_t ticket) const;
 
+    // What the person asked, kept until their answer arrives.
+    //
+    // The turn is filed under a ticket and collected by a later poll, so by the time there is
+    // something to store, the request that produced it is gone. This is that request — held here
+    // rather than sent back up by the browser, because what was asked and who asked it are facts
+    // this side established and must not be re-stated by a client that could say otherwise.
+    struct ChatContext
+    {
+        std::string sessionOid;
+        std::string ownerOid;
+        std::string service;
+        std::string title;
+        std::string model;
+        std::string draft;
+        std::string question;
+        std::string questionOid;
+        std::string answerOid;
+        int seq{0};          // the question's; the answer takes seq + 1
+    };
+    void setChatContext(std::uint32_t ticket, ChatContext ctx);
+    std::optional<ChatContext> takeChatContext(std::uint32_t ticket);
+
     // A grounded turn answers twice on one ticket: the passages as soon as they are found,
     // the answer when the model returns. Kept in its own slot so the second does not
     // overwrite the first — the page shows what was retrieved while the model is still
@@ -179,6 +201,7 @@ private:
 
     std::unordered_map<std::uint32_t, std::string> m_chatResults;
     std::unordered_map<std::uint32_t, std::string> m_chatPartials;
+    std::unordered_map<std::uint32_t, ChatContext> m_chatContexts;
     std::string m_corpusProgress;
     std::string m_benchtestProgress;
     bool m_benchtestRunning{false};

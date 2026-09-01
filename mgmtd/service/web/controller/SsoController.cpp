@@ -181,7 +181,7 @@ void SsoController::info(MgmtdServiceManager& sm, const pz::http::HttpRequest& r
     else
         enabled = auth.value("oidc", json::object()).value("enabled", false);
 
-    const bool adminSetup = !sm.authService().mustChangePassword();
+    const bool adminSetup = !sm.authService().adminSetupPending();
     enabled = enabled && adminSetup;
 
     const json out = {{"enabled", enabled},
@@ -200,7 +200,7 @@ void SsoController::login(MgmtdServiceManager& sm, const pz::http::HttpRequest& 
         resp.location = "/index.html?sso_error=" + code;
     };
 
-    if (sm.authService().mustChangePassword())
+    if (sm.authService().adminSetupPending())
         return redirectErr("setup_required");
 
     const auto auth = ssoAuthConfig();
