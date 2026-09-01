@@ -126,6 +126,7 @@ void ChatController::send(MgmtdServiceManager& sm, const pz::http::HttpRequest& 
     try
     {
         input = json::parse(req.body);
+        LOG_DEBUG("Chat controller input dump: {}", input.dump());
     }
     catch (const std::exception&)
     {

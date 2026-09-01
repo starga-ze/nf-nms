@@ -53,8 +53,8 @@ std::unique_ptr<MgmtdEvent> MgmtdEventFactory::create(std::unique_ptr<pz::ipc::I
     case pz::ipc::IpcCmd::HeartbeatResult:
         return std::make_unique<HeartbeatEvent>(HeartbeatEventType::ReceiveHeartbeatResult, std::move(msg));
 
-    case pz::ipc::IpcCmd::ConfigReloadResponse:
-        return std::make_unique<BootstrapEvent>(BootstrapEventType::ReceiveConfigReloadResponse, std::move(msg));
+    case pz::ipc::IpcCmd::SettingsCommitResponse:
+        return std::make_unique<BootstrapEvent>(BootstrapEventType::ReceiveSettingsCommitResponse, std::move(msg));
 
     case pz::ipc::IpcCmd::AuthSamlAcsResponse:
         return std::make_unique<AuthEvent>(AuthEventType::ReceiveSamlAcsResponse, std::move(msg));

@@ -87,43 +87,66 @@
   const POLL_MS = 400;
   const POLL_TIMEOUT_MS = 90000;
 
-  // How fast an answer is written onto the screen. 55 characters a second sits just above a
-  // comfortable Korean reading pace (~15-25/s) and inside the range a model streaming live would
-  // produce (~30-80/s), so the two are indistinguishable to read.
+  // ── What the wait bubble says, and in what order ────────────────────────────
   //
-  // MAX_STREAM_MS is the ceiling: past roughly a thousand characters, holding the base rate would
-  // make the reader wait longer for the end of the answer than the model took to produce it, so
-  // longer answers speed up to land inside it. FRAME_MS is one animation frame.
+  // A turn is not one wait, it is four, and they fail in different places: the hop to the gateway,
+  // the request-side guardrail, the model itself, and the response-side guardrail. "검사 중" for
+  // all four tells the operator nothing and, for three of them, is not even true.
   //
-  // Two bounds on top of that, because the ceiling alone produced a blur: a 6,000-character answer
-  // divided by 18 seconds is 333 characters a second, which is not reading at any speed.
+  // Each leg carries its own icon, because the icon is what identifies the state at a glance —
+  // the label is what confirms it. The two guardrail legs deliberately share both: it IS the same
+  // control, run twice, and giving them different faces would imply two different checks.
   //
-  //   MAX_CPS          the fastest this will ever reveal text. Past it the eye is not following
-  //                    words, it is watching a block fill in, and the animation has stopped doing
-  //                    the one thing it is for.
-  //   HARD_STREAM_MS   and the answer to what that costs. Capping the rate makes a long answer
-  //                    take longer — 6,000 characters at 170/s is 35 seconds, which is its own
-  //                    kind of bad — so after this much time the rest is simply shown. The opening
-  //                    arrives at a readable pace and nobody waits out a minute of typing.
-  // The numbers, and what they are measured against. A character rate is easier to reason about
-  // as words per minute: divide by 5.5 characters a word, multiply by 60.
+  // WHERE THE STAGE COMES FROM, and what is actually known. Only `gw` is observed today: the POST
+  // is in flight, that is a fact. The rest are ESTIMATED on a timer, because /api/chat/result
+  // answers {status:"pending", text} and nothing else — prompt-scan, inference and response-scan
+  // are one indistinguishable window from the browser. askServer hands `d.stage` straight through
+  // whenever the poll carries one, so the day the pending poll reports a stage
+  // (ChatChunk.stage → mgmtd chatStage(ticket) → this field) these become observed rather than
+  // guessed, with no change on this side.
+  const STAGES = {
+    gw:    { label: '게이트웨이 처리 중…',  icon: 'transit' },
+    scan:  { label: '가드레일 검사 중…',    icon: 'shield'  },   // AIRS, request side
+    infer: { label: 'LLM 응답 대기 중…',    icon: 'spark'   },
+    guard: { label: '가드레일 검사 중…',    icon: 'shield'  },   // AIRS, response side
+  };
+
+  // How long the browser waits before it stops saying "검사" and starts saying "대기". A guess,
+  // and a deliberately short one: the request-side scan is a single API call and the model is the
+  // slow part of every turn, so erring early means the label is wrong for a moment rather than
+  // for most of the wait.
+  const EST_SCAN_MS = 1200;
+
+  // The turn in flight, or null. Module-level because the control that cancels it lives in the
+  // composer and not in send()'s scope.
+  let turnCtl = null;
+
+  // How fast an answer is written onto the screen. One rate, for every answer, start to finish.
   //
-  //   25/s  ≈  270 wpm   reading speed. What a person actually takes it in at.
-  //   50/s  ≈  545 wpm   the fastest this will go, for answers long enough to need it
-  //   170/s ≈ 1850 wpm   what this used to do, which is 6-9x reading speed and read as a flash
+  // 46 characters a second sits just above a comfortable Korean reading pace (~15-25/s) and inside
+  // the range a model streaming live would produce (~30-80/s), so the two are indistinguishable to
+  // read. As words per minute — divide by 5.5 characters a word, multiply by 60 — that is ~500 wpm.
+  // FRAME_MS is one animation frame.
   //
-  // The old ceiling was set against fast READING. The rate that actually looks right is the rate a
-  // model produces at, which is slower — an answer that arrives faster than anything could have
-  // written it does not read as arriving at all.
-  const READ_CPS = 25;
-  const MAX_CPS = 50;
-  const MAX_STREAM_MS = 18000;
-  const HARD_STREAM_MS = 15000;
+  // Deliberately NOT scaled by length, and deliberately without a deadline after which the rest is
+  // dumped. Both were tried and both are the same mistake: they make a long answer arrive faster
+  // than a short one, which is backwards — the reader of a long answer is the one who most needs
+  // to be able to follow it. Every chat UI worth copying streams at a roughly constant rate and
+  // lets a long answer simply take longer, so a 3,000-character reply runs about a minute here.
+  //
+  // The cost of that is real and it is paid by the composer, which stays disabled for the length
+  // of the reveal (see finish()). A stop/skip control is what closes that gap.
+  const STREAM_CPS = 46;
   const FRAME_MS = 16;
-  // How often the DOM is rebuilt while text is arriving. The text advances every frame — that is
-  // the rhythm — but the markdown only has to be re-rendered often enough that nobody sees the
-  // gap, and 110ms is eight times a second.
-  const PAINT_MS = 110;
+  // How often the DOM is rebuilt while text is arriving. The text advances every frame; the DOM
+  // does not have to, because re-parsing a growing answer sixty times a second is what used to
+  // lock the page.
+  //
+  // This was 110ms, and 110ms was the stutter. Nine repaints a second against a 46/s rate is five
+  // characters appearing at once, five times a second — which the eye reads as lurching, not as
+  // writing. 45ms is twenty-two a second: two characters a repaint, below the threshold where the
+  // steps are visible at all, and still a third of the parse budget 60fps would cost.
+  const PAINT_MS = 45;
   // Above this, formatting waits for the end. The parse is over the whole answer every time, so on
   // a very long one even eight a second costs more than italics mid-flight are worth.
   const LIVE_MD_MAX = 8000;
@@ -454,6 +477,12 @@
   async function load() {
     const raw = await threads.read();
     if (Array.isArray(raw.convos)) state.convos = raw.convos;
+    // A wait bubble belongs to a turn in flight, and no turn survives the page. Stored ones are
+    // debris from a reload mid-answer: harmless before, but the elapsed counter would now sit
+    // there counting up from a timestamp in a session that ended.
+    state.convos.forEach(c => {
+      if (Array.isArray(c.messages)) c.messages = c.messages.filter(m => m.kind !== 'wait');
+    });
     // Not validated here: the catalog has not arrived yet, and dropping a stored choice
     // against the one-entry fallback would reset every operator to the first model on load.
     // loadCatalog() checks it once the real list is in.
@@ -729,6 +758,8 @@
     eye:     svg('<path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/>'),
     mask:    svg('<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><line x1="8.5" y1="12" x2="15.5" y2="12"/>'),
     send:    svg('<line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/>'),
+    transit: svg('<polyline points="16 4 21 9 16 14"/><line x1="21" y1="9" x2="7" y2="9"/><polyline points="8 20 3 15 8 10"/><line x1="3" y1="15" x2="17" y2="15"/>'),
+    stop:    svg('<rect x="6" y="6" width="12" height="12" rx="2.5" fill="currentColor"/>'),
     x:       svg('<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>'),
     panel:   svg('<rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/>'),
     spark:   svg('<path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M18.5 15.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z"/>'),
@@ -1599,10 +1630,30 @@
       </div>`;
     }
 
+    // The operator pressed stop. Its own kind, not an error card: nothing failed, and a thread
+    // read back next week must not show a deliberate interruption as an outage.
+    if (m.kind === 'stopped') {
+      return `<div class="chat-turn is-bot" data-msg="${m.id}">
+        <div class="chat-stopped">
+          <span class="chat-stopped-ic">${IC.stop}</span>
+          <span>중단했습니다 · ${Math.round((m.elapsedMs || 0) / 1000)}s 경과</span>
+          <span class="chat-stopped-n">요청은 이미 전송되어 검사 기록에는 남습니다</span>
+        </div>
+      </div>`;
+    }
+
+    // Three things and no fourth: which leg is running (the icon), what that leg is (the label),
+    // and how long it has been running (the counter). A stepper and a dot animation were both
+    // tried here and both were noise — the icon already carries the state, and the counter
+    // already carries the fact that something is still moving.
     if (m.kind === 'wait') {
+      const st = STAGES[m.stage] || STAGES.gw;
       return `<div class="chat-turn is-bot" data-msg="${m.id}">
         <div class="chat-bubble"><span class="chat-wait">
-          <span class="chat-dots"><i></i><i></i><i></i></span>${esc(m.text)}</span></div>
+          <span class="chat-wait-ic" aria-hidden="true">${IC[st.icon] || IC.transit}</span>
+          <span class="chat-wait-l">${esc(st.label)}</span>
+          <span class="chat-wait-t" data-wait-t="${m.id}">${elapsedLabel(m.startedAt)}</span>
+        </span></div>
       </div>`;
     }
 
@@ -1868,10 +1919,103 @@
       .map(m => ({ role: m.role, content: String(m.text) }));
   }
 
-  async function askServer(text, model, history, sessionId, onDelta) {
+  // ── Stop ───────────────────────────────────────────────────────────────────
+  //
+  // One object per turn holding everything an interruption has to reach: the fetch that is open,
+  // the timer waiting on the next poll, and the pacer writing the answer onto the screen. Stop has
+  // to work in both halves of a turn, and they are not the same act:
+  //
+  //   while the turn is upstream   the wait is abandoned. The request itself cannot be recalled —
+  //                                it is at the gateway, it will finish, and it will appear in the
+  //                                scan log — so the notice says that rather than implying the
+  //                                appliance clawed something back.
+  //   while the answer is drawing  the rest is put on screen at once. NOT truncated: the answer
+  //                                is already here, already scanned and already cleared, so
+  //                                throwing it away would be destroying something the guardrail
+  //                                had approved for delivery. Stop here means "don't make me
+  //                                wait", which is the only thing left to be impatient about.
+  function newTurnCtl(onStage) {
+    const listeners = [];
+    const ctl = {
+      ac: new AbortController(),
+      stopped: false,
+      phase: 'request',              // request | render — decides what the button promises
+      stage: onStage || function () {},
+
+      // Returns its own unsubscribe, so a listener that belongs to one phase does not fire in the
+      // next one.
+      whenStopped(fn) {
+        if (ctl.stopped) { fn(); return function () {}; }
+        listeners.push(fn);
+        return function () {
+          const i = listeners.indexOf(fn);
+          if (i >= 0) listeners.splice(i, 1);
+        };
+      },
+
+      // Timers the turn owns. Held here so stopping or finishing a turn cannot leave one behind
+      // to fire against a wait bubble that is no longer on the page.
+      timers: [],
+      later(ms, fn) { ctl.timers.push(setTimeout(fn, ms)); },
+      clearTimers() { ctl.timers.splice(0).forEach(clearTimeout); },
+
+      // A sleep that stop can cut short. Without it the button would feel dead for up to a poll
+      // interval, which on a control whose whole job is to respond now is the wrong feeling.
+      wait(ms) {
+        return new Promise(resolve => {
+          if (ctl.stopped) return resolve();
+          let off = null;
+          const t = setTimeout(() => { if (off) off(); resolve(); }, ms);
+          off = ctl.whenStopped(() => { clearTimeout(t); resolve(); });
+        });
+      },
+
+      stop() {
+        if (ctl.stopped) return;
+        ctl.stopped = true;
+        ctl.clearTimers();
+        try { ctl.ac.abort(); } catch (_) { /* already gone */ }
+        listeners.splice(0).forEach(fn => { try { fn(); } catch (_) { /* one bad listener is not the others' problem */ } });
+      },
+    };
+    return ctl;
+  }
+
+  const elapsedLabel = (t0) => Math.max(0, Math.round((Date.now() - (t0 || Date.now())) / 1000)) + 's';
+
+  // The elapsed counter ticks on its own interval and writes one text node. Driving it through
+  // renderThread() would rebuild every message in the thread once a second to animate two
+  // characters at the bottom of it.
+  let waitTick = null;
+  function startWaitTick(msg) {
+    stopWaitTick();
+    waitTick = setInterval(() => {
+      const el = document.querySelector(`[data-wait-t="${msg.id}"]`);
+      if (el) el.textContent = elapsedLabel(msg.startedAt);
+    }, 250);
+  }
+  function stopWaitTick() {
+    if (waitTick) { clearInterval(waitTick); waitTick = null; }
+  }
+
+  // A stage change DOES repaint the thread — it happens a handful of times a turn, not sixty times
+  // a second, and the label and the stepper both move.
+  function setStage(msg, id) {
+    if (!msg || !STAGES[id] || msg.stage === id) return;
+    msg.stage = id;
+    renderThread(true);
+  }
+
+  async function askServer(text, model, history, sessionId, onDelta, ctl) {
+    // Not an error the operator needs explained — they caused it. It travels as one so it unwinds
+    // the same path every other outcome does, and send() picks it out by code.
+    const aborted = () => gwError('중단했습니다', 'ABORTED', false);
+
     let res;
+    ctl.stage('gw');
     try {
       res = await fetch(CHAT_URL, {
+        signal: ctl.ac.signal,
         method: 'POST',
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
@@ -1885,6 +2029,10 @@
         }),
       });
     } catch (_) {
+      // An aborted fetch throws exactly like an unreachable one. Told apart before the mock is
+      // reached for: falling back to a made-up answer because the operator pressed stop would be
+      // the same lie the fallback exists to avoid.
+      if (ctl.stopped) throw aborted();
       throw gwError('mgmtd could not be reached', 'OFFLINE', true);
     }
 
@@ -1895,16 +2043,34 @@
     const ticket = start && start.ticket;
     if (!ticket) throw gwError('mgmtd returned no ticket', 'BAD_TICKET', false);
 
+    // The ticket is held, so the hop to the gateway is done and the turn is upstream. What it is
+    // doing up there is the part this side cannot see, so the next two legs run on a timer until
+    // the server starts reporting its own — see STAGES.
+    ctl.stage('scan');
+    ctl.later(EST_SCAN_MS, () => ctl.stage('infer'));
+
     const deadline = Date.now() + POLL_TIMEOUT_MS;
     for (;;) {
-      await wait(POLL_MS);
+      await ctl.wait(POLL_MS);
+      if (ctl.stopped) throw aborted();
       if (Date.now() > deadline) throw gwError('the gateway did not answer in time', 'TIMEOUT', false);
 
       let d = null;
       try {
-        const r = await fetch(`${CHAT_RESULT_URL}?ticket=${ticket}`, { credentials: 'same-origin' });
+        const r = await fetch(`${CHAT_RESULT_URL}?ticket=${ticket}`,
+                              { credentials: 'same-origin', signal: ctl.ac.signal });
         if (r.ok) d = await r.json();
-      } catch (_) { /* a dropped poll is not a failed turn — the next one asks again */ }
+      } catch (_) {
+        /* a dropped poll is not a failed turn — the next one asks again. A stopped one is. */
+        if (ctl.stopped) throw aborted();
+      }
+
+      // The server's own stage wins whenever it sends one, and it retires the estimate outright:
+      // a timer that kept firing behind an observed stage would drag the label backwards.
+      if (d && d.status === 'pending' && d.stage) {
+        ctl.clearTimers();
+        ctl.stage(d.stage);
+      }
 
       // The answer as far as it has been written. Cumulative, so this replaces rather than
       // appends — a dropped poll then costs one beat of latency, where appending would silently
@@ -1992,13 +2158,24 @@
     };
   }
 
+  // What a stopped turn leaves behind. Deliberately not an error card — see renderTurn — and
+  // deliberately explicit that the request is not recalled: it is at the gateway, it will finish,
+  // and it will show up in the scan log whether or not anyone is still reading.
+  function stopHere(c, drop, t0) {
+    drop();
+    c.messages.push({
+      id: randId('m_', 10), role: 'assistant', kind: 'stopped',
+      text: '', ts: Date.now(), elapsedMs: Date.now() - t0,
+    });
+    finish(c);
+  }
+
   async function send(raw) {
     const text = raw.trim();
     if (!text || state.sending) return;
 
     state.sending = true;
     renderPicker();
-    setSendEnabled();
 
     let c = activeConvo();
     if (!c) { c = newConvo(); renderRail(); }
@@ -2011,12 +2188,18 @@
     c.messages.push(userMsg);
     c.updatedAt = now;
 
-    // The scan is a step the operator should see happen, not a hidden pause before the answer —
-    // this placeholder is what distinguishes "being inspected" from "being thought about".
+    // The wait is a sequence of steps the operator should see happen, not a hidden pause before
+    // the answer. `stage` is what it is doing and `startedAt` is how long it has been doing it —
+    // between them a turn that is slow and a turn that is stuck stop looking the same, which is
+    // the whole reason a bare spinner was not enough.
     const waitMsg = { id: randId('m_', 10), role: 'assistant', kind: 'wait',
-      text: '검사 중', ts: Date.now() };
+      stage: 'gw', startedAt: Date.now(), ts: Date.now() };
     c.messages.push(waitMsg);
+
+    turnCtl = newTurnCtl((id) => setStage(waitMsg, id));
+    setSendEnabled();                  // the send button is now the stop button
     renderThread();
+    startWaitTick(waitMsg);
     save();
 
     const drop = () => { const i = c.messages.indexOf(waitMsg); if (i >= 0) c.messages.splice(i, 1); };
@@ -2030,7 +2213,6 @@
     // mid-sentence must not leave its fragment sitting above the failure notice as if it were one.
     let liveMsg = null;
     let streamer = null;
-    let streamed = false;   // kept for the catch path below
     try {
       // The answer as it is written. The wait bubble is replaced by a real assistant turn the
       // first time text arrives — from then on the reader is watching the answer appear, which is
@@ -2039,7 +2221,6 @@
       const onDelta = (soFar) => {
         if (!liveMsg) {
           drop();
-          streamed = true;
           liveMsg = { id: randId('m_', 10), role: 'assistant', kind: 'text',
                       text: '', ts: Date.now(), typing: true };
           c.messages.push(liveMsg);
@@ -2049,7 +2230,7 @@
         streamer.push(soFar);
       };
 
-      turn = await askServer(text, convoModel(c), history, c.id, onDelta);
+      turn = await askServer(text, convoModel(c), history, c.id, onDelta, turnCtl);
 
       // A turn that streamed but did not end with an answer — blocked on the response side, or an
       // upstream error after the first tokens — must not leave its fragment on screen. The branch
@@ -2059,10 +2240,17 @@
         if (i >= 0) c.messages.splice(i, 1);
         liveMsg = null;
         streamer = null;
-        streamed = false;
       }
       state.gateway = turn.ok ? 'live' : (turn.code === 'BLOCKED' ? 'live' : 'error');
     } catch (e) {
+      // Stopped, not failed. Checked before the cleanup below because the two want opposite
+      // things: a failure retracts what it streamed, and a stop keeps it — the operator asked for
+      // the interruption, so the words already on screen are theirs.
+      if (e.code === 'ABORTED') {
+        if (streamer) streamer.flush();
+        return stopHere(c, drop, t0);
+      }
+
       // Whatever had streamed goes with the failure. Half an answer left above an error card
       // reads as an answer that was given and then retracted, which is not what happened.
       if (liveMsg) { const i = c.messages.indexOf(liveMsg); if (i >= 0) c.messages.splice(i, 1); }
@@ -2129,29 +2317,43 @@
       if (liveMsg && streamer) {
         liveMsg.scan = scanOrNull;
         liveMsg.route = route;
+        turnCtl.phase = 'render';
+        turnCtl.whenStopped(() => streamer.flush());
+        setSendEnabled();
         await streamer.end(String(turn.reply || ''));
         renderThread(true);        // repaint once, now that the pill and copy button apply
         finish(c);
         return;
       }
 
+      // Nothing streamed — the whole answer landed on one poll. Revealed through the SAME pacer
+      // the streamed path uses, not a second one: whether the text arrived in pieces or all at
+      // once is a fact about the transport, and the reader should not be able to tell. `text`
+      // starts empty and the pacer fills it in.
       const botMsg = {
         id: randId('m_', 10), role: 'assistant', kind: 'text',
-        text: String(turn.reply || ''), ts: Date.now(),
+        text: '', ts: Date.now(),
         scan: scanOrNull,
         typing: true,
         route,
       };
       c.messages.push(botMsg);
       renderThread();
-      await typeOut(botMsg);
+      const pacer = streamInto(botMsg);
+      turnCtl.phase = 'render';
+      turnCtl.whenStopped(() => pacer.flush());
+      setSendEnabled();
+      await pacer.end(String(turn.reply || ''));
+      renderThread(true);        // repaint once, now that the pill and copy button apply
       finish(c);
       return;
     }
 
     // ── No gateway: the local mock answers, and says so ─────────────────────
     const promptScan = scan(text, 'prompt');
-    await wait(320 + promptScan.latencyMs);
+    setStage(waitMsg, 'scan');
+    await turnCtl.wait(320 + promptScan.latencyMs);
+    if (turnCtl.stopped) return stopHere(c, drop, t0);
     userMsg.scan = promptScan;
 
     if (promptScan.verdict === 'block') {
@@ -2165,12 +2367,13 @@
     }
 
     const outbound = promptScan.outbound != null ? promptScan.outbound : text;
-    waitMsg.text = '모델 응답 생성 중';
-    renderThread();
+    setStage(waitMsg, 'infer');
 
-    await wait(420 + Math.random() * 400);
+    await turnCtl.wait(420 + Math.random() * 400);
+    if (turnCtl.stopped) return stopHere(c, drop, t0);
     const reply = mockReply(outbound);
 
+    setStage(waitMsg, 'guard');
     const respScan = scan(reply, 'response');
     drop();
 
@@ -2186,7 +2389,7 @@
     const delivered = respScan.outbound != null ? respScan.outbound : reply;
     const botMsg = {
       id: randId('m_', 10), role: 'assistant', kind: 'text',
-      text: delivered, ts: Date.now(), scan: respScan, typing: true,
+      text: '', ts: Date.now(), scan: respScan, typing: true,
       route: {
         model: convoModel(c),
         tokensIn: tokensOf(outbound), tokensOut: tokensOf(delivered),
@@ -2195,12 +2398,20 @@
     };
     c.messages.push(botMsg);
     renderThread();
-    await typeOut(botMsg);
+    const mockPacer = streamInto(botMsg);
+    turnCtl.phase = 'render';
+    turnCtl.whenStopped(() => mockPacer.flush());
+    setSendEnabled();
+    await mockPacer.end(delivered);
+    renderThread(true);
 
     finish(c);
   }
 
   function finish(c) {
+    stopWaitTick();
+    if (turnCtl) turnCtl.clearTimers();
+    turnCtl = null;
     c.updatedAt = Date.now();
     // Newest thread first, matching every other message list an operator has used.
     state.convos.sort((a, b) => b.updatedAt - a.updatedAt);
@@ -2232,8 +2443,10 @@
     let resolveEnd = null;
     let timer = null;
     let carry = 0;   // fractional characters owed from the previous frame
-    let startedAt = 0;
     let lastPaint = 0;
+    // Set by flush(), and it is sticky: once the operator has said "stop making me wait", nothing
+    // that arrives afterwards gets to start pacing again.
+    let flushed = false;
 
     // Reveal on a word boundary, not on the character the budget happened to land on.
     //
@@ -2306,33 +2519,27 @@
     const tick = () => {
       const backlog = full.length - msg.text.length;
       if (backlog > 0) {
-        // Paced by reading speed, not by how much text is waiting.
+        // A flat rate, independent of how much text is waiting.
         //
         // The obvious rule — drain a fixed share of the backlog each frame — is wrong here, and
         // measurably so: it makes a long answer appear FASTER than a short one (3,000 characters
-        // came out at ~3,300/s, which is not reading, it is a page-load). Rate is derived from the
-        // answer's length instead, so every answer arrives at a speed a person can follow.
+        // came out at ~3,300/s, which is not reading, it is a page-load). Deriving the rate from
+        // the answer's length was the same mistake one step removed. So: one rate, and a long
+        // answer takes longer, which is what it should do.
         //
         // Be clear about what this is. The gateway call is not streaming — the response-side
         // guardrail has to see the whole answer to rule on it, so by the time the first character
         // is drawn the last one already exists. This paces a finished answer. It is presentation,
         // not transport, and the honest reason to do it is that the alternative is a four-second
         // blank followed by a wall of text.
-        // Someone who has asked their system not to animate things gets the answer, not a show.
-        if (!startedAt) startedAt = Date.now();
-
-        // Out of time: show the rest. Not a failure — the pacing has already done its job, which
-        // was to let the answer start being read rather than landing as a wall.
-        if (!instant && Date.now() - startedAt >= HARD_STREAM_MS) {
+        if (instant) {
+          // Someone who has asked their system not to animate things gets the answer, not a show.
           msg.text = full;
           paint(true);
         } else {
-          const cps = instant ? Infinity
-            : Math.min(MAX_CPS, Math.max(READ_CPS, full.length / (MAX_STREAM_MS / 1000)));
-
           // Jittered, because a real stream is not metronomic. Without this the bursts land on a
           // perfectly even beat, which reads as a timer rather than as something being written.
-          carry += cps * (FRAME_MS / 1000) * (0.75 + Math.random() * 0.5);
+          carry += STREAM_CPS * (FRAME_MS / 1000) * (0.88 + Math.random() * 0.24);
           if (carry < 1) { timer = setTimeout(tick, FRAME_MS); return; }
 
           const budget = Math.floor(carry);
@@ -2357,13 +2564,31 @@
       push(soFar) {
         if (typeof soFar !== 'string' || soFar.length <= full.length) return;
         full = soFar;
+        if (flushed) { msg.text = full; paint(true); return; }
         if (!timer) timer = setTimeout(tick, 0);
+      },
+      // Stop pacing and put everything that has actually arrived on screen, now. This is Stop's
+      // render half: the answer is already local and already cleared by the response-side
+      // checkpoint, so there is nothing to withhold — only a wait to cut short. Safe before the
+      // turn resolves too, in which case it finalises on whatever had streamed.
+      flush() {
+        flushed = true;
+        if (timer) { clearTimeout(timer); timer = null; }
+        msg.text = full;
+        done = true;
+        msg.typing = false;
+        paint(true);
+        if (resolveEnd) { const r = resolveEnd; resolveEnd = null; r(); }
       },
       // Called with the final text once the turn resolves. Anything the display has not caught up
       // to yet is still drained rather than snapped in, so the answer never ends with a lurch.
       end(finalText) {
         if (typeof finalText === 'string' && finalText.length >= full.length) full = finalText;
         done = true;
+        // Already flushed — the stop landed while the answer was still on its way. The remaining
+        // text is shown, not paced: re-pacing it here would let the turn out-live the instruction
+        // that ended it.
+        if (flushed) { msg.text = full; msg.typing = false; paint(true); return Promise.resolve(); }
         if (!timer) timer = setTimeout(tick, 0);
         return new Promise(resolve => {
           if (!timer && msg.text.length >= full.length) { msg.typing = false; paint(true); return resolve(); }
@@ -2374,42 +2599,32 @@
     };
   }
 
-  function typeOut(msg) {
-    return new Promise(resolve => {
-      const el = document.querySelector(`[data-body="${msg.id}"]`);
-      if (!el) { msg.typing = false; return resolve(); }
-
-      const total = msg.text.length;
-      const step = Math.max(2, Math.ceil(total / 90));
-      let i = 0;
-      // Same rule as streamInto: plain text while it types, markdown once at the end. This path
-      // ran the parser ninety times over the whole answer for the same reason and with the same
-      // result on a long one.
-      const tick = () => {
-        i = Math.min(total, i + step);
-        const pinned = atBottom();
-        if (i < total) {
-          el.classList.add('is-streaming');
-          el.textContent = msg.text.slice(0, i);
-        } else {
-          el.classList.remove('is-streaming');
-          el.innerHTML = renderText(msg.text);
-        }
-        if (pinned) scrollToEnd();
-        if (i >= total) { msg.typing = false; return resolve(); }
-        setTimeout(tick, 16);
-      };
-      tick();
-    });
-  }
-
   // ── Wiring ─────────────────────────────────────────────────────────────────
 
+  // The send button and the stop button are the same button. Exactly one of the two actions is
+  // ever available — you cannot send during a turn and there is nothing to stop outside one — so a
+  // second control would sit disabled and meaningless for almost all of the page's life.
   function setSendEnabled() {
     const input = document.getElementById('chatInput');
     const btn = document.getElementById('chatSend');
     if (!input || !btn) return;
-    btn.disabled = state.sending || !input.value.trim();
+
+    const stopping = state.sending && !!turnCtl && !turnCtl.stopped;
+
+    // Swapped only on the transition. setSendEnabled runs on every keystroke, and rewriting the
+    // button's innerHTML on each one would throw away and rebuild an SVG for nothing.
+    if (btn.classList.contains('is-stop') !== stopping) {
+      btn.classList.toggle('is-stop', stopping);
+      btn.innerHTML = stopping ? IC.stop : IC.send;
+      btn.setAttribute('aria-label', stopping ? 'Stop' : 'Send');
+    }
+    // What stop means depends on which half of the turn is running, and the two are different
+    // enough that the button has to say which one it is offering.
+    btn.title = stopping
+      ? (turnCtl.phase === 'render' ? '나머지 전체 표시' : '요청 중단')
+      : '';
+
+    btn.disabled = stopping ? false : (state.sending || !input.value.trim());
     input.disabled = state.sending;
   }
 
@@ -2427,14 +2642,28 @@
       input.value = '';
       autoGrow(input);
       setSendEnabled();
-      send(v).catch(() => { state.sending = false; renderPicker(); setSendEnabled(); });
+      send(v).catch(() => {
+        stopWaitTick();
+        turnCtl = null;
+        state.sending = false;
+        renderPicker();
+        setSendEnabled();
+      });
     };
 
     input.addEventListener('input', () => { autoGrow(input); setSendEnabled(); });
     input.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); submit(); }
     });
-    sendBtn.addEventListener('click', submit);
+    sendBtn.addEventListener('click', () => {
+      // Same button, and which act it performs is decided by whether a turn is running — never by
+      // what the button looked like when the click started.
+      if (state.sending) {
+        if (turnCtl) { turnCtl.stop(); setSendEnabled(); }
+        return;
+      }
+      submit();
+    });
 
     document.getElementById('chatCol').addEventListener('click', (e) => {
       const sug = e.target.closest('[data-sug]');

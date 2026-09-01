@@ -109,7 +109,7 @@ GrpcClient::Outcome GrpcClient::chat(const std::string& model,
         out->set_content(turn.content);
     }
 
-    LOG_DEBUG("{}", dumpChatRequest(request));
+    LOG_TRACE("{}", dumpChatRequest(request));
 
     grpc::ClientContext ctx;
     std::unique_ptr<grpc::ClientReader<v1::ChatChunk>> reader(

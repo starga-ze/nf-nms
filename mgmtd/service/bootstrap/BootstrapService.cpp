@@ -174,16 +174,16 @@ void BootstrapService::handleEvent(MgmtdServiceManager& serviceManager, const Bo
         break;
     }
 
-    case BootstrapEventType::ReceiveConfigReloadResponse:
+    case BootstrapEventType::ReceiveSettingsCommitResponse:
     {
         const auto* msg = event.message();
         if (!msg)
         {
-            LOG_WARN("received empty ConfigReloadResponse");
+            LOG_WARN("received empty SettingsCommitResponse");
             return;
         }
 
-        onConfigReloadResponse(serviceManager, *msg);
+        onSettingsCommitResponse(serviceManager, *msg);
         break;
     }
 
@@ -199,8 +199,8 @@ void BootstrapService::handleEvent(MgmtdServiceManager& serviceManager, const Bo
 //
 // The flag is the authority and the payload is a courtesy — a message that lost its body still has a
 // header, so a missing payload is read as whatever the flag says rather than as success.
-void BootstrapService::onConfigReloadResponse(MgmtdServiceManager& serviceManager,
-                                              const pz::ipc::IpcMessage& msg)
+void BootstrapService::onSettingsCommitResponse(MgmtdServiceManager& serviceManager,
+                                                const pz::ipc::IpcMessage& msg)
 {
     bool ok = !pz::ipc::IpcProtocol::hasFlag(msg.getFlags(), pz::ipc::IpcFlag::Error);
 
@@ -215,7 +215,7 @@ void BootstrapService::onConfigReloadResponse(MgmtdServiceManager& serviceManage
         }
         catch (const std::exception& e)
         {
-            LOG_WARN("ConfigReloadResponse payload was not JSON ({}) — trusting the header flag", e.what());
+            LOG_WARN("SettingsCommitResponse payload was not JSON ({}) — trusting the header flag", e.what());
         }
     }
 

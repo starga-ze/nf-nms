@@ -18,7 +18,7 @@ namespace pz::mgmtd
 // Why an event at all, when the router could simply call the store: because that is the pattern every
 // other daemon follows, and because a router that writes state is a router that quietly acquires
 // domain logic. The TopologyResponse branch had already grown a JSON parse and a drop-on-malformed
-// rule inside MgmtdRxRouter; the ConfigReloadResponse branch discarded engined's error flag because
+// rule inside MgmtdRxRouter; the SettingsCommitResponse branch discarded engined's error flag because
 // there was no handler in which checking it was the obvious thing to do. Routing these through their
 // owning controller puts each one somewhere its failure modes are somebody's job.
 enum class WebIpcEventType : std::uint32_t

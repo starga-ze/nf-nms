@@ -65,7 +65,7 @@ void CommitService::startNext(EnginedServiceManager& serviceManager)
         sendQueueStatus(serviceManager);
 
         auto action = serviceManager.actionFactory()->create(EnginedActionDomain::Commit,
-                                                             static_cast<std::uint32_t>(CommitActionType::ApplyCommit));
+                static_cast<std::uint32_t>(CommitActionType::ApplyCommit));
         serviceManager.postAction(std::move(action));
         return;
     }

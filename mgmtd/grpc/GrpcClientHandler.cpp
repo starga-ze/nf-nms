@@ -214,7 +214,7 @@ struct GrpcClientHandler::Impl
         }
         else
         {
-            LOG_DEBUG("pretzel-ai {} answered (ticket={}, {} bytes)", grpcCmdToStr(task.cmd),
+            LOG_TRACE("pretzel-ai {} answered (ticket={}, {} bytes)", grpcCmdToStr(task.cmd),
                       task.ticket, json.size());
         }
 
@@ -349,8 +349,6 @@ void GrpcClientHandler::setResultSink(ResultSink sink)
 
 void GrpcClientHandler::egress(GrpcMessage message)
 {
-    LOG_INFO("Egress: {}", grpcCmdToStr(message.cmd));
-
     // Cancel does not queue. Every other command waits its turn behind the worker pool, but a
     // cancel that waited would be a cancel that arrives after the thing it was cancelling — and
     // the operator pressed it because they want the crawl to stop now.

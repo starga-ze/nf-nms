@@ -634,17 +634,27 @@ body.page-chatbot .content-body {
 .chat-verdict.active { border-color: var(--accent); color: var(--accent); }
 .chat-time { font-size: 10px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
 
-/* Scanning / thinking. Two states, because they are two different waits: the scan happens before
-   anything is sent upstream, and saying "thinking" during it would be a lie. */
-.chat-wait { display: inline-flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--text-muted); }
-.chat-dots { display: inline-flex; gap: 3px; }
-.chat-dots i {
-  width: 5px; height: 5px; border-radius: 50%; background: var(--text-muted);
-  animation: chatBlink 1.25s infinite;
+/* Waiting. Not one state but four, because they are genuinely different waits and they fail in
+   different places: the hop to the gateway, the request-side guardrail, the model, and the
+   response-side guardrail. Three elements and no fourth — the icon identifies the leg, the label
+   confirms it, the counter says how long, which is what separates "slow" from "stuck". A dot
+   animation and a stepper both sat here and both were noise beside an icon that already changes. */
+.chat-wait {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-size: 11.5px; color: var(--text-muted);
 }
-.chat-dots i:nth-child(2) { animation-delay: .18s; }
-.chat-dots i:nth-child(3) { animation-delay: .36s; }
-@keyframes chatBlink { 0%, 60%, 100% { opacity: .28; } 30% { opacity: 1; } }
+/* The icon carries the state, so it is the one thing here that moves. Breathing rather than
+   spinning: a spinner claims progress it cannot measure, and three of these four legs are timed
+   guesses until the server reports its own. */
+.chat-wait-ic {
+  line-height: 0; color: var(--accent);
+  animation: chatWaitPulse 1.6s ease-in-out infinite;
+}
+.chat-wait-ic svg { width: 13px; height: 13px; stroke-width: 2.1; }
+@keyframes chatWaitPulse { 0%, 100% { opacity: .45; } 50% { opacity: 1; } }
+.chat-wait-l { color: var(--text-secondary); font-weight: 600; }
+/* Tabular, or the counter shoves the label sideways every time it crosses a digit width. */
+.chat-wait-t { font-variant-numeric: tabular-nums; color: var(--text-muted); }
 
 .chat-caret {
   display: inline-block; width: 6px; height: 14px; margin-left: 2px;
@@ -729,6 +739,22 @@ body.page-chatbot .content-body {
 .chat-send:hover { opacity: .88; }
 .chat-send:disabled { opacity: .32; cursor: not-allowed; }
 .chat-send svg { width: 16px; height: 16px; stroke-width: 2.2; }
+/* Stop, in the send button's own slot. Orange rather than red: this is an interruption the
+   operator chose, not a failure being reported to them. */
+.chat-send.is-stop { background: var(--orange); }
+.chat-send.is-stop svg { width: 14px; height: 14px; }
+
+/* A stopped turn. Deliberately not shaped like the failure card — a thread read back later has to
+   show a deliberate interruption as one, not as an outage. */
+.chat-stopped {
+  display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 7px 11px; border-radius: 9px; font-size: 11.5px;
+  color: var(--ink-amber); background: var(--tint-orange);
+  border: 1px solid color-mix(in srgb, var(--orange) 35%, transparent);
+}
+.chat-stopped-ic { line-height: 0; color: var(--orange); }
+.chat-stopped-ic svg { width: 11px; height: 11px; }
+.chat-stopped-n { color: var(--text-muted); font-size: 10.5px; }
 
 .chat-foot {
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
@@ -853,15 +879,34 @@ body.page-chatbot .content-body {
 }
 
 /* ── Narrow screens ─────────────────────────────────────────────────────────── */
+/* The rail stays in the flow at every width. It used to go absolute here, and it has no toggle —
+   `state.railOpen` is stored and rendered but nothing ever flips it — so an absolutely positioned
+   rail is a panel parked over the left of the thread with no way to move it. Splitting the window
+   in half was enough to trigger it: the measure stays centred in the full band, the rail covers
+   its first ~140px, and the answer runs on underneath. So it narrows instead, and the thread's
+   own gutter narrows with it so the measure survives the loss.
+   The inspector is a different case and keeps its overlay: it is opened and closed by the reader,
+   so covering the band is a state they chose and can leave. */
 @media (max-width: 1180px) {
   .chat-inspect { width: 300px; }
 }
+@media (max-width: 1024px) {
+  .chat-rail { width: 184px; }
+  .chat-col { padding: 0 16px; }
+}
 @media (max-width: 980px) {
-  .chat-rail { position: absolute; z-index: 30; height: 100%; box-shadow: var(--shadow); }
-  .chat-rail.is-hidden { box-shadow: none; }
-  /* The inspector takes the whole band rather than squeezing the thread into a column of two
-     words per line. */
+  /* Whole band rather than squeezing the thread into a column of two words per line. */
   .chat-inspect { position: absolute; right: 0; top: 0; height: 100%; width: min(360px, 100%); z-index: 31; box-shadow: var(--shadow); }
+}
+@media (max-width: 860px) {
+  .chat-rail { width: 158px; }
+  .chat-col { padding: 0 12px; }
+  .chat-turn.is-user .chat-bubble { max-width: 92%; }
+}
+/* Below this the rail costs more than it carries — what is left of the thread would be unreadable
+   — so it folds away and the thread takes the band. */
+@media (max-width: 700px) {
+  .chat-rail { width: 0; border-right-color: transparent; overflow: hidden; }
 }
 
 /* ── Markdown in answers ────────────────────────────────────────────────────── */

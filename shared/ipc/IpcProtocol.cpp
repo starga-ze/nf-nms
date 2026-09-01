@@ -95,12 +95,10 @@ const char* IpcProtocol::cmdToStr(IpcCmd cmd) noexcept
         return "HeartbeatResult";
     case IpcCmd::ConfigApply:
         return "ConfigApply";
-    case IpcCmd::ConfigReloadRequest:
-        return "ConfigReloadRequest";
-    case IpcCmd::ConfigReloadResponse:
-        return "ConfigReloadResponse";
     case IpcCmd::SettingsCommitRequest:
         return "SettingsCommitRequest";
+    case IpcCmd::SettingsCommitResponse:
+        return "SettingsCommitResponse";
     case IpcCmd::SettingsCommitStatus:
         return "SettingsCommitStatus";
     case IpcCmd::ScanRequest:
@@ -172,9 +170,8 @@ CmdCategory IpcProtocol::classify(IpcCmd cmd) noexcept
 {
     switch (cmd)
     {
-    // Config distribution.
-    case IpcCmd::ConfigReloadRequest:
-    case IpcCmd::ConfigReloadResponse:
+    // Config distribution. The broadcast alone: SettingsCommitResponse is engined's reply on the
+    // commit flow and is classified with the other status replies below.
     case IpcCmd::ConfigApply:
         return CmdCategory::Config;
 
@@ -223,7 +220,8 @@ CmdCategory IpcProtocol::classify(IpcCmd cmd) noexcept
         return CmdCategory::Read;
 
     // Handshake, sync, runtime, heartbeat, transport error, and status replies — infra, not a
-    // feature edge (SettingsCommitStatus is engined's reply on the commit flow, not a write to it).
+    // feature edge (SettingsCommitResponse and SettingsCommitStatus are engined's replies on the
+    // commit flow, not writes to it).
     case IpcCmd::ClientHello:
     case IpcCmd::ServerHello:
     case IpcCmd::SyncRequest:
@@ -234,6 +232,7 @@ CmdCategory IpcProtocol::classify(IpcCmd cmd) noexcept
     case IpcCmd::HeartbeatRequest:
     case IpcCmd::HeartbeatResponse:
     case IpcCmd::HeartbeatResult:
+    case IpcCmd::SettingsCommitResponse:
     case IpcCmd::SettingsCommitStatus:
     case IpcCmd::Unknown:
     default:

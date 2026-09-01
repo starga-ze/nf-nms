@@ -57,7 +57,7 @@ private:
     std::unique_ptr<pz::ipc::IpcMessage> buildClientHelloMessage() const;
     std::unique_ptr<pz::ipc::IpcMessage> buildSyncRequestMessage() const;
     std::unique_ptr<pz::ipc::IpcMessage> buildRuntimeStartMessage() const;
-    std::unique_ptr<pz::ipc::IpcMessage> buildConfigReloadResponse(bool ok) const;
+    std::unique_ptr<pz::ipc::IpcMessage> buildSettingsCommitResponse(bool ok) const;
 
 private:
     EnginedEventFactory* m_eventFactory{nullptr};

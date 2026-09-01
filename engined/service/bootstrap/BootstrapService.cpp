@@ -289,8 +289,8 @@ void BootstrapService::handleAction(EnginedServiceManager& serviceManager, const
         if (m_isReload)
         {
             m_isReload = false;
-            LOG_INFO("Tx ConfigReloadResponse(ok) to mgmtd");
-            serviceManager.txRouter().handleIpcMessage(buildConfigReloadResponse(true));
+            LOG_INFO("Tx SettingsCommitResponse(ok) to mgmtd");
+            serviceManager.txRouter().handleIpcMessage(buildSettingsCommitResponse(true));
 
             auto doneEvent = serviceManager.eventFactory()->create(
                 EnginedEventDomain::Commit, static_cast<std::uint32_t>(CommitEventType::ReloadComplete));
@@ -301,8 +301,8 @@ void BootstrapService::handleAction(EnginedServiceManager& serviceManager, const
 
     case BootstrapActionType::SendReloadFailed:
     {
-        LOG_INFO("Tx ConfigReloadResponse(failed) to mgmtd");
-        serviceManager.txRouter().handleIpcMessage(buildConfigReloadResponse(false));
+        LOG_INFO("Tx SettingsCommitResponse(failed) to mgmtd");
+        serviceManager.txRouter().handleIpcMessage(buildSettingsCommitResponse(false));
 
         auto failEvent = serviceManager.eventFactory()->create(
             EnginedEventDomain::Commit, static_cast<std::uint32_t>(CommitEventType::ReloadFailed));
@@ -620,7 +620,7 @@ std::unique_ptr<pz::ipc::IpcMessage> BootstrapService::buildRuntimeStartMessage(
     return msg;
 }
 
-std::unique_ptr<pz::ipc::IpcMessage> BootstrapService::buildConfigReloadResponse(bool ok) const
+std::unique_ptr<pz::ipc::IpcMessage> BootstrapService::buildSettingsCommitResponse(bool ok) const
 {
     auto flag = pz::ipc::IpcProtocol::toFlag(pz::ipc::IpcFlag::Response);
     if (!ok)
@@ -629,7 +629,7 @@ std::unique_ptr<pz::ipc::IpcMessage> BootstrapService::buildConfigReloadResponse
     }
 
     pz::ipc::IpcHeader header = pz::ipc::IpcHeader::build(pz::ipc::IpcDaemon::Engined, pz::ipc::IpcDaemon::Mgmtd,
-                                                          pz::ipc::IpcCmd::ConfigReloadResponse, 0, flag);
+                                                          pz::ipc::IpcCmd::SettingsCommitResponse, 0, flag);
 
     auto msg = std::make_unique<pz::ipc::IpcMessage>(std::move(header));
 

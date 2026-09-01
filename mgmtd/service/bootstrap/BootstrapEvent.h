@@ -18,7 +18,7 @@ enum class BootstrapEventType : std::uint32_t
     // engined reports the fleet has converged onto the committed configuration — or has failed to.
     // The runtime lifecycle is this service's domain either way; a commit reload is the same
     // handshake the daemon already tracks, run again against a new target version.
-    ReceiveConfigReloadResponse = 4,
+    ReceiveSettingsCommitResponse = 4,
     // This daemon is up and its configuration is loaded. Distinct from ReceiveRuntimeStart, which
     // is engined announcing that the FLEET converged: that one does not fire when mgmtd restarts
     // on its own, and the assistant's config is pushed from here — so relying on it alone left a

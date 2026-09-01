@@ -50,14 +50,20 @@ enum class IpcCmd : std::uint16_t
     HeartbeatResult = 106,
 
     // ── Config distribution (engined authors and fans out) ──
-    ConfigReloadRequest = 108,
-    ConfigReloadResponse = 109,
     // Was ConfigReload. One-way broadcast that tells every daemon to apply the newly committed
-    // config; deliberately named apart from the ConfigReload{Request,Response} RPC above.
+    // config. engined, ipcd and mgmtd are deliberately not among the destinations: the first two
+    // do not hold a service config, and mgmtd learns the commit landed from SettingsCommitResponse
+    // below — the reply to the request it made — rather than from the fan-out it is not part of.
     ConfigApply = 107,
+    // 108 (ConfigReloadRequest) reserved: never sent. It was the request half of an RPC whose
+    // response half is now SettingsCommitResponse, named for the request that actually provokes it.
 
     // ── Settings & admin (mgmtd → engined; engined is the sole DB writer) ──
     SettingsCommitRequest = 110,
+    // Was ConfigReloadResponse, which paired with nothing: mgmtd asks with SettingsCommitRequest
+    // and this is what answers it. Sent once the fleet has converged onto the committed version —
+    // or failed to, which arrives as Response|Error rather than as a different command.
+    SettingsCommitResponse = 109,
     // Was CommitQueueStatus. engined → mgmtd, commit-queue progress for the settings-commit flow.
     SettingsCommitStatus = 111,
     AdminPasswordUpdate = 114,
