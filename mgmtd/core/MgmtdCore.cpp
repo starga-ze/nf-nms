@@ -1,4 +1,5 @@
 #include "core/MgmtdCore.h"
+#include "service/ai/AiConfig.h"
 
 #include "http/HttpHandler.h"
 #include "http/StaticFileCache.h"
@@ -81,6 +82,16 @@ bool MgmtdCore::onInit()
     m_grpcClientHandler->setResultSink(
         [rx = m_rxRouter.get()](GrpcCmd cmd, std::uint32_t ticket, std::string json)
         { rx->handleGrpcMessage(cmd, ticket, std::move(json)); });
+
+    // pretzel-ai came back. It caches what it was last pushed, so a restarted one usually
+    // returns on the configuration it had — but a fresh install, or one whose cache was lost,
+    // comes back with nothing and no other event would ever correct it: every other push is
+    // triggered by something happening on THIS side.
+    //
+    // Delivered on the loop thread by GrpcClientHandler::poll(), which is what makes it safe to
+    // read the running config and use the tx router from here.
+    m_grpcClientHandler->setReconnectSink(
+        [sm = m_serviceManager.get()] { pushAiConfig(*sm, "pretzel-ai reconnected"); });
 
     if (m_ipcClient)
     {

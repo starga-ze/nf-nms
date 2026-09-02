@@ -149,12 +149,18 @@ void storeTurn(MgmtdServiceManager& sm, const MgmtdServiceManager::ChatContext& 
                      {"role", "user"},
                      {"content", ctx.question}};
 
+    // On a turn that failed there is no reply, and the content is the reason — the same text the
+    // live thread shows on its error card. Storing the empty reply instead left the row with
+    // nothing in it, so a conversation read back later showed a question answered by a blank
+    // bubble and no way to tell a blocked turn from an unreachable vendor.
+    const bool answered = answer.value("ok", false);
     json reply = {{"oid", ctx.answerOid},
                   {"seq", ctx.seq + 1},
                   {"role", "assistant"},
-                  {"content", answer.value("reply", std::string())},
+                  {"content", answered ? answer.value("reply", std::string())
+                                       : answer.value("error", std::string())},
                   {"model", answer.value("model", ctx.model)},
-                  {"ok", answer.value("ok", false)},
+                  {"ok", answered},
                   {"code", answer.value("code", std::string())},
                   {"latency_ms", answer.value("latency_ms", 0)}};
     // The verdict, whole. It is most of the reason the conversation is kept at all — a blocked
@@ -195,7 +201,6 @@ void ChatController::send(MgmtdServiceManager& sm, const pz::http::HttpRequest& 
     try
     {
         input = json::parse(req.body);
-        LOG_DEBUG("Chat controller input dump: {}", input.dump());
     }
     catch (const std::exception&)
     {
@@ -248,7 +253,7 @@ void ChatController::send(MgmtdServiceManager& sm, const pz::http::HttpRequest& 
     // The history is not logged either, and for the same reason — only how much of it there was.
     // The transaction id IS logged, unlike the message and the history: it carries no content,
     // and it is the only way to line this log up with a scan report someone is asking about.
-    LOG_INFO("chat turn delegated to pretzel-ai (ticket={}, model={}, chars={}, history={}, "
+    LOG_DEBUG("chat turn delegated to pretzel-ai (ticket={}, model={}, chars={}, history={}, "
              "session={}, txn={})",
              ticket, model.empty() ? "default" : model, message.size(), historyTurns,
              sessionId.empty() ? "none" : sessionId,

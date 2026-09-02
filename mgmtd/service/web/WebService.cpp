@@ -174,10 +174,21 @@ WebService::Resolved WebService::resolve(const std::string& method, const std::s
 
         // The assistant's conversations. Kept on the appliance so they survive a sign-out and are
         // there from a second machine — which is what they were not while they lived in a browser.
+        //
+        // Prefix, not Exact, for the reason the topology row gives above: the conversation travels
+        // as ?oid=<id>, and an Exact row stops matching the moment a query string is appended. It
+        // fails as a 404 with no handler ever called — the rail lists the conversations (no query)
+        // while opening one 404s, which reads as a conversation that lost its history rather than
+        // as a routing bug.
+        //
+        // `sessions` must precede `session` for the samples/sample reason: with both Prefix, the
+        // shorter path would otherwise claim the longer one's target. Both are Prefix rather than
+        // leaving the list Exact, so that adding a query parameter to the list tomorrow does not
+        // silently drop it into this row's handler.
         {"GET",  "/api/chat/sessions",
-            Match::Exact,  WebRoute::ChatSessions,      Access::Authenticated, false},
+            Match::Prefix, WebRoute::ChatSessions,      Access::Authenticated, false},
         {"GET",  "/api/chat/session",
-            Match::Exact,  WebRoute::ChatSession,       Access::Authenticated, false},
+            Match::Prefix, WebRoute::ChatSession,       Access::Authenticated, false},
         {"POST", "/api/chat/session/delete",
             Match::Exact,  WebRoute::ChatSessionDelete, Access::Authenticated, false},
         {"POST", "/api/chat/session/patch",

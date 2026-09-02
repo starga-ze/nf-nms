@@ -127,6 +127,9 @@
     // and operation.js still key off `user` and `operation` — so only the way in moved.
     { id: 'user-management', label: 'User Management', section: 'system', tabs: [
         { id: 'user',         label: 'User Management'  } ] },
+    // No `section`, deliberately: this group is promoted to its own sidebar entry under
+    // Administrator, and the missing field is what keeps it out of the Configuration flyout. It
+    // stays in this list because ?tab=operation still has to resolve to a group and a heading.
     { id: 'system-operation', label: 'System Operation', tabs: [
         { id: 'operation',    label: 'System Operation' } ] },
   ];
@@ -195,6 +198,27 @@
              <path d="M4 12v5c0 1.7 3.6 3 8 3s8-1.3 8-3v-5"/>`,
     },
 
+    // Its own section rather than a third entry under Infra Service. What sits up there is the
+    // customer's estate — what they run and what it is doing; this is the VENDOR's product
+    // documentation, which the assistant answers out of. Two different subjects that happen to
+    // both be collected, and filing them together would make "Infra Service" mean "everything
+    // with a crawler behind it".
+    //
+    // Named for what it provides rather than for what it holds, so a second source — release
+    // notes, a customer's own runbooks — lands here without the section needing a new name.
+    { type: 'section', label: 'Knowledge Service' },
+    {
+      // The corpus as a reader sees it. Collecting it is an action on the appliance and stays
+      // under Administrator ▸ System Operation; this is where an operator comes to check what the
+      // assistant can actually answer out of, which is a different errand.
+      type: 'link', id: 'pa-tech-docs', label: 'PA Tech Docs', href: 'tech-doc',
+      icon: `<path d="M12 6.6C10.4 5.1 8.4 4.6 6 4.6a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1
+                      c2.4 0 4.4.5 6 2"/>
+             <path d="M12 6.6c1.6-1.5 3.6-2 6-2a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1
+                      c-2.4 0-4.4.5-6 2"/>
+             <path d="M12 6.6v13"/>`,
+    },
+
     { type: 'section', label: 'Control' },
     {
       type: 'link', id: 'remote-access', label: 'Remote Access', href: '#', soon: true,
@@ -210,7 +234,12 @@
       // A flyout group, not a link: the groups live here so the topbar carries a single row of
       // tabs. Each subitem opens its group's first tab.
       type: 'group', id: 'configuration', label: 'Configuration',
-      subitems: SETTINGS_GROUPS.map(g => ({
+      // `section` is what puts a group in this flyout, and its absence is what takes it out. A
+      // group promoted to a sidebar entry of its own drops the field and disappears from here,
+      // while staying in SETTINGS_GROUPS — the tab still has to resolve, and the topbar still
+      // reads its heading from the group. Mapped without this filter, a promoted group kept
+      // rendering here under a blank section header, so it appeared in both places at once.
+      subitems: SETTINGS_GROUPS.filter(g => g.section).map(g => ({
         id: g.id,
         label: g.label,
         section: SETTINGS_SECTIONS[g.section] || '',
@@ -277,9 +306,10 @@
     'collection':      { title: 'API Collection' },
     'log-viewer':      { title: 'System Log' },
     'laboratory':      { title: 'Laboratory' },
-    // Reached from the Tech Documentation card, not from the sidebar: it is a view of one
-    // appliance dataset rather than a place an operator navigates to on their own.
-    'tech-doc':        { title: 'Tech Documentation' },
+    // Two ways in, for two errands: the sidebar's Knowledge Service entry for reading the corpus,
+    // and the Tech Documentation card under System Operation for collecting it. The title matches
+    // the sidebar label, because that is what the operator clicked to get here.
+    'tech-doc':        { title: 'PA Tech Docs' },
   };
 
   // The flyout is rebuilt from the toggle's data-subitems each time it opens, so marking the

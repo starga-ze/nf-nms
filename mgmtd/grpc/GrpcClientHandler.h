@@ -48,6 +48,15 @@ public:
     // Where answers are filed. Wired once at startup; invoked only from drain().
     void setResultSink(ResultSink sink);
 
+    // Called on the MAIN LOOP when the channel comes back after having been down.
+    //
+    // The watch runs on its own thread and cannot make this call itself: what it would want to do
+    // — re-read the running config and push it — touches the config cache and the tx router, and
+    // both of those belong to the loop. So the watch raises a flag and poll() below delivers it
+    // here, on the thread that may act on it.
+    using ReconnectSink = std::function<void()>;
+    void setReconnectSink(ReconnectSink sink);
+
     // Dispatch one call. Returns immediately; answers arrive later via poll().
     void egress(GrpcMessage message);
 

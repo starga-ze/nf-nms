@@ -38,9 +38,15 @@
  *            block — mistaking the two is exactly the failure the AIRS lab exists to catch.
  *   uninspected  no hook_results at all: the guardrail is not on this call's path.
  *
- * Conversations live in localStorage: this browser, this machine. Every read and write goes
- * through `threads` below, which is the seam the server-side store will be dropped into — see the
- * note on it for what that needs and what is still undecided.
+ * Conversations live on the appliance, keyed to the signed-in ACCOUNT rather than to a browser:
+ * mgmtd resolves the session cookie to a local_users row and every query is filtered on that id,
+ * so the same account sees the same history after a logout, on another machine, or in another
+ * browser. Every read and write goes through `threads` below, which is the seam that store is
+ * reached through.
+ *
+ * localStorage holds preferences only — which conversation was open, the model, the mode, and the
+ * rail's state. Nothing in it is a conversation, and losing all of it costs a reader nothing but
+ * the place they had left off.
  */
 (function () {
   'use strict';
@@ -532,6 +538,14 @@
   }
 
   // A stored message in the shape the thread renderer already reads.
+  //
+  // `kind` is reconstructed rather than stored. What the row carries is what HAPPENED — ok, code,
+  // scan — and which card to draw follows from that; a stored kind would be a second answer to the
+  // same question, free to disagree with the first after a renderer changes.
+  //
+  // Getting it wrong is not a cosmetic loss. Left as 'text', a blocked turn and a failed one both
+  // come back as an empty bubble, so a thread read back next week shows a question that was
+  // apparently answered with silence — which is exactly what the conversation was kept to prevent.
   function msgFromRow(row) {
     const m = { id: row.oid, role: row.role, kind: 'text', text: row.content || '',
                 ts: row.created_at || '' };
@@ -540,6 +554,19 @@
     if (typeof row.ok === 'boolean') m.ok = row.ok;
     if (typeof row.latency_ms === 'number') m.latencyMs = row.latency_ms;
     if (row.scan) m.scan = row.scan;
+
+    // Only an assistant turn that did not succeed. `ok` is absent on rows written before it was
+    // recorded, and an absent one stays a plain bubble rather than being guessed at.
+    if (row.role === 'assistant' && m.ok === false) {
+      // A block and an outage are different events and get different cards. The block card reads
+      // m.scan directly, so it is only chosen when there is one to read.
+      m.kind = (m.scan && m.scan.verdict === 'block') ? 'block' : 'error';
+      if (m.kind === 'error') {
+        // The distinction the error card leads with: did the guardrail run at all? A model that
+        // could not answer and a turn nothing inspected look identical from the chat window.
+        m.scanned = !!(m.scan && m.scan.present);
+      }
+    }
     return m;
   }
 
@@ -803,7 +830,12 @@
 
   async function selectConvo(id) {
     const c = state.convos.find(x => x.id === id);
-    if (!c || state.activeId === id) return;
+    if (!c) return;
+
+    // Re-selecting the open conversation is a no-op only once its messages are in hand. A session
+    // restored from prefs arrives active and unloaded, and returning here left the operator
+    // clicking a conversation that never filled in.
+    if (state.activeId === id && c.loaded) return;
     state.activeId = id;
     state.inspectId = '';
     save();
@@ -1613,7 +1645,12 @@
 
   function verdictPill(m) {
     if (!state.badges || !m.scan) return '';
-    const v = m.scan.verdict;
+
+    // A scan that reports {present: false} carries no verdict field at all — nothing inspected the
+    // turn, which is one of the four things this badge exists to mark. Read as-is it produced
+    // `undefined`, and the pill rendered the word "undefined" at the reader.
+    const v = m.scan.present === false ? 'uninspected' : m.scan.verdict;
+    if (!VERDICT_ICON[v]) return '';
     // A clean turn says nothing. The badge exists to mark the exceptions — blocked, redacted,
     // flagged-and-sent, never inspected — and printing "clean" on every ordinary message buries
     // those four under a wall of green that nobody reads by the third turn. The scan is still
@@ -2973,5 +3010,19 @@
     if (!resume) state.activeId = '';
 
     mount();
+
+    // A session restored from prefs has never been through selectConvo, and selectConvo is the
+    // only other caller of ensureLoaded — so without this its messages are never fetched and the
+    // thread opens blank. Clicking it does not recover either: selectConvo used to return early on
+    // the session that is already active, which made the blank thread look like a conversation
+    // that had lost its history.
+    //
+    // After mount rather than before it, so the rail and the empty thread paint immediately and
+    // the messages fill in when they arrive — the same order selectConvo uses.
+    if (state.activeId) {
+      const opened = state.activeId;
+      await ensureLoaded(state.convos.find(c => c.id === opened));
+      if (state.activeId === opened) renderThread();
+    }
   });
 }());

@@ -22,6 +22,11 @@ namespace pz::mgmtd
 namespace
 {
 
+// grpc_connectivity_state, as the two values this file compares against.
+constexpr int kStateConnecting = 1;
+constexpr int kStateReady = 2;
+constexpr int kStateTransientFailure = 3;
+
 // grpc_connectivity_state as a name, for the connection log.
 const char* stateName(int s)
 {
@@ -159,6 +164,12 @@ struct GrpcClientHandler::Impl
     // happens inside an event handler on the main loop rather than on a worker thread. It is the
     // seam that keeps the manager single-threaded.
     ResultSink sink;
+
+    // Raised by the channel watch when it sees the connection come back, lowered by poll() on
+    // the main loop. An atomic and not a queue entry: what matters is that a reconnect happened
+    // since the last tick, not how many times.
+    ReconnectSink reconnectSink;
+    std::atomic<bool> reconnected{false};
 
     std::vector<std::thread> workers;
     std::thread monitor;
@@ -427,18 +438,53 @@ struct GrpcClientHandler::Impl
     {
         int last = client.connectivityState(/*tryToConnect=*/true);
         LOG_INFO("pretzel-ai gRPC channel ({}): {}", target, stateName(last));
+
+        // Whether this connection has ever been up. The first READY is the handshake mgmtd's
+        // own startup push already covers; every later one is a peer that came back.
+        bool sawReady = (last == kStateReady);
         while (!tasks.stopping.load())
         {
             // Block up to 1s for a change, then re-check — the timeout also lets us notice stopping.
             client.waitForStateChange(last, 1000);
             if (tasks.stopping.load())
                 break;
-            const int now = client.connectivityState(/*tryToConnect=*/false);
-            if (now != last)
+
+            // Asking to connect, not merely asking. A channel with no traffic goes IDLE and stays
+            // there: it does not notice the peer restart, does not transition, and this loop sees
+            // nothing — which made the watch stop watching exactly when it mattered, because a
+            // peer that restarts during a quiet spell is the case this exists for.
+            //
+            // The cost is one loopback connection held open. The benefit is that the channel is
+            // already up when a turn arrives, and that a restarted peer is seen within a second
+            // rather than at the next call.
+            const int now = client.connectivityState(/*tryToConnect=*/true);
+            if (now == last)
+                continue;
+
+            LOG_INFO("pretzel-ai gRPC channel: {} -> {}", stateName(last), stateName(now));
+
+            // Back after having been away. pretzel-ai holds its configuration in memory and
+            // caches it to disk, so a restarted one usually comes back on what it had — but a
+            // fresh install, or one whose cache was lost, comes back mute and nothing else would
+            // ever tell it otherwise. mgmtd pushes on its OWN lifecycle events, not on this
+            // peer's, so without this the assistant stays dead until an operator happens to
+            // commit something.
+            //
+            // Every return to READY, not only the ones from a failed state. A channel goes IDLE
+            // when nothing has used it for a while, so a peer that restarts during a quiet spell
+            // comes back as IDLE -> CONNECTING -> READY — which is the commonest case, and the
+            // one an earlier version of this condition excluded.
+            //
+            // Not the FIRST time: mgmtd's own start already pushes, and a second one a
+            // millisecond later says nothing new. Every one after that is a peer that went away.
+            if (now == kStateReady)
             {
-                LOG_INFO("pretzel-ai gRPC channel: {} -> {}", stateName(last), stateName(now));
-                last = now;
+                if (sawReady)
+                    reconnected.store(true);
+                sawReady = true;
             }
+
+            last = now;
         }
     }
 };
@@ -496,6 +542,11 @@ void GrpcClientHandler::setResultSink(ResultSink sink)
     m_impl->sink = std::move(sink);
 }
 
+void GrpcClientHandler::setReconnectSink(ReconnectSink sink)
+{
+    m_impl->reconnectSink = std::move(sink);
+}
+
 void GrpcClientHandler::egress(GrpcMessage message)
 {
     // Cancel does not queue. Every other command waits its turn behind the worker pool, but a
@@ -545,6 +596,11 @@ void GrpcClientHandler::egress(GrpcMessage message)
 
 void GrpcClientHandler::poll()
 {
+    // Exchange, not load-then-store: the watch may raise the flag again between the two, and a
+    // reconnect that was noticed and then dropped is one the assistant does not come back from.
+    if (m_impl->reconnected.exchange(false) && m_impl->reconnectSink)
+        m_impl->reconnectSink();
+
     // Idle fast path: a cheap peek, no work when no worker has produced an answer since the last
     // tick. Only when the queue is non-empty do we take the delivery path.
     if (m_impl->done.empty())

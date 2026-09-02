@@ -120,8 +120,14 @@ void ChatService::storeTurn(const std::string& payloadJson)
         if (oid.empty())
             continue;
 
-        // ON CONFLICT DO NOTHING on the oid: a message is written once. mgmtd files a turn when
-        // pretzel-ai answers, and a retry that arrived twice must not double the conversation.
+        // A message is written once. mgmtd files a turn when pretzel-ai answers, and a retry that
+        // arrived twice must not double the conversation.
+        //
+        // DO NOTHING with no conflict target on purpose: chat_message has TWO unique constraints,
+        // the oid primary key and UNIQUE (session, seq). Naming only the oid left the second one
+        // to raise, so a retry that re-used a seq under a fresh oid failed the insert instead of
+        // being absorbed - and a failed insert here loses that half-turn silently, which is how a
+        // conversation ends up with a question and no answer.
         const bool ok = db.exec(
             "INSERT INTO chat_message "
             "  (oid, session, seq, role, content, model, ok, code, latency_ms, scan) "
@@ -129,7 +135,7 @@ void ChatService::storeTurn(const std::string& payloadJson)
             "        CASE WHEN $7 = '' THEN NULL ELSE $7::boolean END, "
             "        NULLIF($8,''), CASE WHEN $9 = '' THEN NULL ELSE $9::int END, "
             "        CASE WHEN $10 = '' THEN NULL ELSE $10::jsonb END) "
-            "ON CONFLICT (oid) DO NOTHING",
+            "ON CONFLICT DO NOTHING",
             {oid, session, std::to_string(m.value("seq", 0)), str(m, "role"), str(m, "content"),
              str(m, "model"),
              m.contains("ok") && m["ok"].is_boolean() ? (m["ok"].get<bool>() ? "true" : "false") : "",
